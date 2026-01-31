@@ -1,0 +1,194 @@
+mod prompts;
+
+use tauri::Emitter;
+
+use crate::llm::ChatMessage;
+use crate::state::AppState;
+use crate::types::{GenerateProgress, GeneratedDocument, Message, Session};
+
+use prompts::*;
+
+pub async fn generate_all_documents(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    session_id: &str,
+) -> Result<Vec<GeneratedDocument>, String> {
+    let messages = state
+        .db
+        .get_messages(session_id)
+        .map_err(|e| format!("Failed to load messages: {}", e))?;
+
+    let session = state
+        .db
+        .get_session(session_id)
+        .map_err(|e| format!("Failed to load session: {}", e))?;
+
+    let conversation = format_conversation_for_prompt(&messages);
+    let config = state.config.lock().unwrap().clone();
+
+    // Delete any existing documents for this session
+    state
+        .db
+        .delete_documents(session_id)
+        .map_err(|e| format!("Failed to clear old documents: {}", e))?;
+
+    let mut documents = Vec::new();
+    let include_conversation = config.output.include_conversation;
+
+    // Order: SPEC → CLAUDE → PROMPTS → README (cross-referencing order)
+    let doc_configs = [
+        ("SPEC.md", SPEC_PROMPT),
+        ("CLAUDE.md", CLAUDE_PROMPT),
+        ("PROMPTS.md", PROMPTS_PROMPT),
+        ("README.md", README_PROMPT),
+    ];
+
+    let total = doc_configs.len() + if include_conversation { 1 } else { 0 };
+
+    for (i, (filename, prompt_template)) in doc_configs.iter().enumerate() {
+        // Emit progress
+        let _ = app.emit(
+            "generate:progress",
+            GenerateProgress {
+                current: i + 1,
+                total,
+                filename: filename.to_string(),
+            },
+        );
+
+        let prompt = prompt_template.replace("{conversation_history}", &conversation);
+
+        let llm_messages = vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: DOCGEN_SYSTEM_PROMPT.to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: prompt.clone(),
+            },
+        ];
+
+        let mut content = state
+            .ollama
+            .generate(
+                &config.llm.base_url,
+                &config.llm.model,
+                llm_messages,
+                0.4, // Lower temperature for structured output
+            )
+            .await?;
+
+        // Validate output starts with # heading — retry once if not
+        if !content.trim_start().starts_with('#') {
+            let retry_messages = vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: DOCGEN_SYSTEM_PROMPT.to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: format!(
+                        "{}\n\nIMPORTANT: Start with a # heading. Output only valid Markdown.",
+                        prompt
+                    ),
+                },
+            ];
+
+            content = state
+                .ollama
+                .generate(&config.llm.base_url, &config.llm.model, retry_messages, 0.3)
+                .await?;
+        }
+
+        let doc = state
+            .db
+            .save_document(session_id, filename, &content)
+            .map_err(|e| format!("Failed to save {}: {}", filename, e))?;
+
+        documents.push(doc);
+    }
+
+    // CONVERSATION.md — generated from data, not LLM (optional)
+    if include_conversation {
+        let _ = app.emit(
+            "generate:progress",
+            GenerateProgress {
+                current: total,
+                total,
+                filename: "CONVERSATION.md".to_string(),
+            },
+        );
+
+        let conversation_md = generate_conversation_md(&session, &messages);
+        let doc = state
+            .db
+            .save_document(session_id, "CONVERSATION.md", &conversation_md)
+            .map_err(|e| format!("Failed to save CONVERSATION.md: {}", e))?;
+        documents.push(doc);
+    }
+
+    let _ = app.emit("generate:complete", documents.len());
+
+    Ok(documents)
+}
+
+fn format_conversation_for_prompt(messages: &[Message]) -> String {
+    let mut output = String::new();
+
+    for msg in messages {
+        if msg.role == "system" {
+            continue;
+        }
+
+        let label = match msg.role.as_str() {
+            "user" => "User",
+            "assistant" => "AuraForge",
+            _ => "Unknown",
+        };
+
+        output.push_str(&format!("{}: {}\n\n", label, msg.content));
+    }
+
+    output
+}
+
+fn generate_conversation_md(session: &Session, messages: &[Message]) -> String {
+    let mut output = format!(
+        "# {} - Planning Conversation\n\n\
+         This is the complete planning conversation that generated these documents.\n\
+         Kept for reference—you can revisit to understand why decisions were made.\n\n\
+         ---\n\n\
+         **Session started**: {}\n\n\
+         ---\n\n",
+        session.name, session.created_at
+    );
+
+    for message in messages {
+        let role_label = match message.role.as_str() {
+            "user" => "**User**",
+            "assistant" => "**AuraForge**",
+            "system" => continue,
+            _ => "**Unknown**",
+        };
+
+        output.push_str(&format!("{}: {}\n\n", role_label, message.content));
+
+        // Include search context if present in metadata
+        if let Some(ref metadata_str) = message.metadata {
+            if let Ok(meta) = serde_json::from_str::<serde_json::Value>(metadata_str) {
+                if let Some(query) = meta.get("search_query").and_then(|v| v.as_str()) {
+                    output.push_str(&format!("*[Searched: {}]*\n\n", query));
+                }
+            }
+        }
+    }
+
+    output.push_str(&format!(
+        "---\n\n\
+         **Session ended**: {}\n",
+        session.updated_at
+    ));
+
+    output
+}
