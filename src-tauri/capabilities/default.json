@@ -9,6 +9,7 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "fs:default",
-    "shell:default"
+    "shell:default",
+    "shell:allow-open"
   ]
 }

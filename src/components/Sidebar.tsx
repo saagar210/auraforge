@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Flame, Trash2, MessageSquare, Settings } from "lucide-react";
+import { Flame, Trash2, MessageSquare, Settings, HelpCircle } from "lucide-react";
 import { clsx } from "clsx";
 import { useChatStore } from "../stores/chatStore";
 import { SettingsPanel } from "./SettingsPanel";
@@ -13,6 +13,8 @@ export function Sidebar() {
     deleteSession,
     showSettings,
     setShowSettings,
+    setShowHelp,
+    sidebarCollapsed,
   } = useChatStore();
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -46,6 +48,10 @@ export function Sidebar() {
       return "";
     }
   };
+
+  if (sidebarCollapsed) {
+    return null;
+  }
 
   return (
     <aside
@@ -136,7 +142,7 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-4 py-3 border-t border-border-subtle">
+      <div className="px-4 py-3 border-t border-border-subtle flex items-center gap-3">
         <button
           onClick={() => setShowSettings(true)}
           aria-label="Open settings"
@@ -144,6 +150,13 @@ export function Sidebar() {
         >
           <Settings className="w-4 h-4" aria-hidden="true" />
           <span>Settings</span>
+        </button>
+        <button
+          onClick={() => setShowHelp(true)}
+          aria-label="Open help"
+          className="flex items-center gap-2 text-text-secondary text-xs hover:text-text-primary transition-colors duration-200 cursor-pointer bg-transparent border-none ml-auto"
+        >
+          <HelpCircle className="w-4 h-4" aria-hidden="true" />
         </button>
       </div>
 

@@ -8,11 +8,14 @@ import { ForgeButton } from "./components/ForgeButton";
 import { ForgingProgress } from "./components/ForgingProgress";
 import { DocumentPreview } from "./components/DocumentPreview";
 import { EmptyState } from "./components/EmptyState";
-import { OnboardingModal } from "./components/OnboardingModal";
+import { OnboardingWizard } from "./components/OnboardingWizard";
+import { HelpPanel } from "./components/HelpPanel";
+import { InfoTooltip } from "./components/InfoTooltip";
 import { Toast } from "./components/Toast";
 import { EmberParticles } from "./components/EmberParticles";
 import { ThermalBackground } from "./components/ThermalBackground";
 import { useChatStore } from "./stores/chatStore";
+import { friendlyError } from "./utils/errorMessages";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, X, FileText, MessageSquare } from "lucide-react";
 
@@ -31,11 +34,14 @@ function App() {
     documentsStale,
     showPreview,
     healthStatus,
-    onboardingDismissed,
+    wizardCompleted,
+    isFirstSession,
     showSettings,
+    showHelp,
     checkHealth,
-    dismissOnboarding,
+    loadPreferences,
     setShowSettings,
+    setShowHelp,
     loadSessions,
     createSession,
     sendMessage,
@@ -45,6 +51,7 @@ function App() {
     setShowPreview,
     saveToFolder,
     openFolder,
+    markFirstSessionComplete,
     toast,
     dismissToast,
     initEventListeners,
@@ -52,31 +59,25 @@ function App() {
   } = useChatStore();
 
   const [inputValue, setInputValue] = useState("");
-  const [healthChecking, setHealthChecking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // Initialize on mount — run health check first
+  // Initialize on mount
   useEffect(() => {
+    loadPreferences();
     checkHealth();
     loadSessions();
     initEventListeners();
     return () => cleanupEventListeners();
   }, []);
 
-  const handleCheckHealth = useCallback(async () => {
-    setHealthChecking(true);
-    await checkHealth();
-    setHealthChecking(false);
-  }, [checkHealth]);
-
-  // Show onboarding if health check failed and not dismissed
+  // Show onboarding wizard if not completed
   const showOnboarding =
     healthStatus !== null &&
-    !onboardingDismissed &&
+    !wizardCompleted &&
     (!healthStatus.ollama_connected || !healthStatus.ollama_model_available);
 
-  // Derived state (used by keyboard shortcuts and rendering)
+  // Derived state
   const userMessageCount = messages.filter((m) => m.role === "user").length;
   const assistantMessageCount = messages.filter(
     (m) => m.role === "assistant",
@@ -89,12 +90,20 @@ function App() {
   const hasDocuments = documents.length > 0;
 
   const handleSend = (content: string) => {
+    // Mark first session complete on first message
+    if (isFirstSession) {
+      markFirstSessionComplete();
+    }
     sendMessage(content);
     setInputValue("");
   };
 
   const handleNewProject = async () => {
     await createSession();
+  };
+
+  const handleSuggestionClick = (text: string) => {
+    setInputValue(`I want to build ${text.toLowerCase()}`);
   };
 
   const handleSaveToFolder = useCallback(async () => {
@@ -108,15 +117,20 @@ function App() {
     }
   }, [saveToFolder]);
 
+  // Friendly error display
+  const errorDisplay = streamError ? friendlyError(streamError) : null;
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isMod = e.metaKey || e.ctrlKey;
 
-      // Escape — Close settings / switch from preview to chat (always active)
+      // Escape — Close panels
       if (e.key === "Escape") {
         if (showSettings) {
           setShowSettings(false);
+        } else if (showHelp) {
+          setShowHelp(false);
         } else if (showOnboarding) {
           // Can't dismiss onboarding via Escape
         } else if (showPreview) {
@@ -125,7 +139,7 @@ function App() {
         return;
       }
 
-      // Cmd+, — Toggle settings (always active)
+      // Cmd+, — Toggle settings
       if (isMod && e.key === ",") {
         e.preventDefault();
         setShowSettings(!showSettings);
@@ -157,13 +171,27 @@ function App() {
         }
         return;
       }
+
+      // Cmd+? — Toggle help
+      if (isMod && e.key === "/") {
+        e.preventDefault();
+        setShowHelp(!showHelp);
+        return;
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [canForge, hasDocuments, showSettings, showPreview, showOnboarding]);
+  }, [
+    canForge,
+    hasDocuments,
+    showSettings,
+    showPreview,
+    showOnboarding,
+    showHelp,
+  ]);
 
-  // Auto-scroll to bottom on new messages or streaming content
+  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent, isStreaming, isGenerating]);
@@ -199,7 +227,10 @@ function App() {
                       : "bg-transparent text-text-secondary hover:text-text-primary"
                   }`}
                 >
-                  <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
+                  <MessageSquare
+                    className="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
                   Chat
                 </button>
                 <button
@@ -250,6 +281,8 @@ function App() {
                       <EmptyState
                         hasSession={true}
                         onNewProject={handleNewProject}
+                        isFirstSession={isFirstSession}
+                        onSuggestionClick={handleSuggestionClick}
                       />
                     ) : (
                       <>
@@ -283,11 +316,14 @@ function App() {
 
                         {/* Forge the Plan button */}
                         {canForge && (
-                          <ForgeButton
-                            onClick={generateDocuments}
-                            disabled={!canForge}
-                            generating={isGenerating}
-                          />
+                          <div className="flex items-center gap-2">
+                            <ForgeButton
+                              onClick={generateDocuments}
+                              disabled={!canForge}
+                              generating={isGenerating}
+                            />
+                            <InfoTooltip text="Generates 5 planning documents from your conversation" />
+                          </div>
                         )}
                       </>
                     )}
@@ -297,29 +333,39 @@ function App() {
                 </div>
 
                 {/* Stream Error */}
-                {streamError && (
-                  <div className="px-6 mb-2" role="alert"><div className="max-w-[720px] mx-auto">
-                    <div className="flex items-start gap-3 p-3 bg-status-error/10 border border-status-error/30 rounded-lg">
-                      <AlertCircle className="w-4 h-4 text-status-error shrink-0 mt-0.5" aria-hidden="true" />
-                      <p className="text-sm text-text-primary flex-1">
-                        {streamError}
-                      </p>
-                      <button
-                        onClick={retryLastMessage}
-                        aria-label="Retry last message"
-                        className="text-xs text-accent-gold hover:text-accent-gold/80 cursor-pointer bg-transparent border border-accent-gold/40 rounded px-2 py-1 whitespace-nowrap transition-colors"
-                      >
-                        Retry
-                      </button>
-                      <button
-                        onClick={clearStreamError}
-                        aria-label="Dismiss error"
-                        className="text-text-muted hover:text-text-primary cursor-pointer bg-transparent border-none"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+                {errorDisplay && (
+                  <div className="px-6 mb-2" role="alert">
+                    <div className="max-w-[720px] mx-auto">
+                      <div className="flex items-start gap-3 p-3 bg-status-error/10 border border-status-error/30 rounded-lg">
+                        <AlertCircle
+                          className="w-4 h-4 text-status-error shrink-0 mt-0.5"
+                          aria-hidden="true"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-text-primary">
+                            {errorDisplay.message}
+                          </p>
+                          <p className="text-xs text-text-secondary mt-0.5">
+                            {errorDisplay.suggestion}
+                          </p>
+                        </div>
+                        <button
+                          onClick={retryLastMessage}
+                          aria-label="Retry last message"
+                          className="text-xs text-accent-gold hover:text-accent-gold/80 cursor-pointer bg-transparent border border-accent-gold/40 rounded px-2 py-1 whitespace-nowrap transition-colors"
+                        >
+                          Retry
+                        </button>
+                        <button
+                          onClick={clearStreamError}
+                          aria-label="Dismiss error"
+                          className="text-text-muted hover:text-text-primary cursor-pointer bg-transparent border-none"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                  </div></div>
+                  </div>
                 )}
 
                 {/* Chat Input */}
@@ -336,6 +382,7 @@ function App() {
           <EmptyState hasSession={false} onNewProject={handleNewProject} />
         )}
       </main>
+
       {/* Toast Notifications */}
       {toast && (
         <Toast
@@ -353,15 +400,11 @@ function App() {
         />
       )}
 
-      {/* Onboarding Modal */}
-      {showOnboarding && healthStatus && (
-        <OnboardingModal
-          health={healthStatus}
-          onCheckAgain={handleCheckHealth}
-          onContinue={dismissOnboarding}
-          checking={healthChecking}
-        />
-      )}
+      {/* Help Panel */}
+      <HelpPanel open={showHelp} onClose={() => setShowHelp(false)} />
+
+      {/* Onboarding Wizard */}
+      {showOnboarding && healthStatus && <OnboardingWizard />}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { X, RotateCcw } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { useChatStore } from "../stores/chatStore";
 import type { AppConfig, LLMConfig, SearchConfig, OutputConfig } from "../types";
 
@@ -17,8 +18,10 @@ const SECTIONS: { key: Section; label: string }[] = [
 ];
 
 export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
-  const { loadConfig, updateConfig } = useChatStore();
+  const { loadConfig, updateConfig, listModels, installedModels } =
+    useChatStore();
 
+  const [isAdvanced, setIsAdvanced] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("llm");
   const [saving, setSaving] = useState(false);
 
@@ -33,6 +36,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [searchEnabled, setSearchEnabled] = useState(true);
   const [searchProvider, setSearchProvider] = useState("tavily");
   const [tavilyApiKey, setTavilyApiKey] = useState("");
+  const [searxngUrl, setSearxngUrl] = useState("");
   const [proactive, setProactive] = useState(true);
 
   // Output state
@@ -43,23 +47,23 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     if (open) {
       loadConfig().then((config: AppConfig | null) => {
         if (!config) return;
-        // LLM
         setLlmProvider(config.llm.provider);
         setModel(config.llm.model);
         setBaseUrl(config.llm.base_url);
         setTemperature(config.llm.temperature);
         setMaxTokens(config.llm.max_tokens);
-        // Search
         setSearchEnabled(config.search.enabled);
         setSearchProvider(config.search.provider);
         setTavilyApiKey(config.search.tavily_api_key);
+        setSearxngUrl(config.search.searxng_url);
         setProactive(config.search.proactive);
-        // Output
         setIncludeConversation(config.output.include_conversation);
         setDefaultSavePath(config.output.default_save_path);
       });
+      // Load installed models for dropdown
+      listModels();
     }
-  }, [open, loadConfig]);
+  }, [open, loadConfig, listModels]);
 
   if (!open) return null;
 
@@ -78,7 +82,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       enabled: searchEnabled,
       provider: searchProvider as SearchConfig["provider"],
       tavily_api_key: tavilyApiKey,
-      searxng_url: "",
+      searxng_url: searxngUrl,
       proactive,
     };
 
@@ -92,10 +96,19 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     onClose();
   };
 
+  const handleRerunSetup = async () => {
+    await invoke("set_preference", { key: "wizard_completed", value: "false" });
+    useChatStore.setState({ wizardCompleted: false, onboardingDismissed: false, wizardStep: "welcome" });
+    onClose();
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center animate-[fade-in_0.2s_ease]"
-      style={{ background: "rgba(0, 0, 0, 0.7)", backdropFilter: "blur(4px)" }}
+      style={{
+        background: "rgba(0, 0, 0, 0.7)",
+        backdropFilter: "blur(4px)",
+      }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
       role="dialog"
       aria-modal="true"
@@ -119,200 +132,82 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           </button>
         </div>
 
-        {/* Section Tabs */}
-        <div className="flex gap-1 px-6 pt-4">
-          {SECTIONS.map((s) => (
-            <button
-              key={s.key}
-              onClick={() => setActiveSection(s.key)}
-              className={`px-3 py-1.5 text-xs font-heading font-medium rounded-md transition-colors cursor-pointer border-none ${
-                activeSection === s.key
-                  ? "bg-surface text-accent-gold"
-                  : "bg-transparent text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
         {/* Content */}
-        <div className="px-6 py-5 overflow-y-auto" style={{ maxHeight: "calc(80vh - 180px)" }}>
-          {activeSection === "llm" && (
+        <div
+          className="px-6 py-5 overflow-y-auto"
+          style={{ maxHeight: "calc(80vh - 140px)" }}
+        >
+          {!isAdvanced ? (
+            /* =================== SIMPLE MODE =================== */
             <div className="space-y-5">
-              <h3 className="text-sm font-heading font-medium text-text-secondary uppercase tracking-wider">
-                Language Model
-              </h3>
-
-              {/* Provider */}
+              {/* AI Model Dropdown */}
               <div>
                 <label className="block text-sm text-text-secondary mb-1.5">
-                  Provider
+                  AI Model
                 </label>
-                <select
-                  value={llmProvider}
-                  onChange={(e) => setLlmProvider(e.target.value)}
-                  className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
-                >
-                  <option value="ollama">Ollama (Local)</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="openai">OpenAI</option>
-                </select>
+                {installedModels.length > 0 ? (
+                  <select
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                  >
+                    {installedModels.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder="e.g. qwen3-coder:30b"
+                    className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                  />
+                )}
               </div>
 
-              {/* Model */}
+              {/* Web Search Toggle */}
               <div>
-                <label className="block text-sm text-text-secondary mb-1.5">
-                  Model
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-sm text-text-primary">Web Search</span>
+                  <Toggle
+                    checked={searchEnabled}
+                    onChange={setSearchEnabled}
+                  />
                 </label>
-                <input
-                  type="text"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="e.g. qwen3-coder:30b"
-                  className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
-                />
-              </div>
 
-              {/* Base URL */}
-              <div>
-                <label className="block text-sm text-text-secondary mb-1.5">
-                  Base URL
-                </label>
-                <input
-                  type="text"
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="http://localhost:11434"
-                  className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
-                />
-              </div>
-
-              {/* Temperature */}
-              <div>
-                <label className="flex items-center justify-between text-sm text-text-secondary mb-1.5">
-                  <span>Temperature</span>
-                  <span className="text-text-muted font-mono text-xs">
-                    {temperature.toFixed(1)}
-                  </span>
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="2"
-                  step="0.1"
-                  value={temperature}
-                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                  className="w-full accent-accent-gold"
-                />
-              </div>
-
-              {/* Max Tokens */}
-              <div>
-                <label className="block text-sm text-text-secondary mb-1.5">
-                  Max Tokens
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={maxTokens}
-                  onChange={(e) => setMaxTokens(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
-                />
-              </div>
-            </div>
-          )}
-
-          {activeSection === "search" && (
-            <div className="space-y-5">
-              <h3 className="text-sm font-heading font-medium text-text-secondary uppercase tracking-wider">
-                Web Search
-              </h3>
-
-              {/* Enable Toggle */}
-              <label className="flex items-center justify-between cursor-pointer">
-                <span className="text-sm text-text-primary">
-                  Enable Web Search
-                </span>
-                <Toggle checked={searchEnabled} onChange={setSearchEnabled} />
-              </label>
-
-              {searchEnabled && (
-                <>
-                  {/* Provider Select */}
-                  <div>
-                    <label className="block text-sm text-text-secondary mb-1.5">
-                      Provider
-                    </label>
-                    <select
-                      value={searchProvider}
-                      onChange={(e) => setSearchProvider(e.target.value)}
-                      className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                {searchEnabled && !tavilyApiKey && (
+                  <div className="mt-2 text-xs text-text-muted">
+                    Using basic search. For better results, add a{" "}
+                    <a
+                      href="https://tavily.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent-glow hover:text-accent-gold underline"
                     >
-                      <option value="tavily">Tavily</option>
-                      <option value="duckduckgo">DuckDuckGo</option>
-                    </select>
+                      Tavily API key
+                    </a>{" "}
+                    (free):
+                    <input
+                      type="password"
+                      value={tavilyApiKey}
+                      onChange={(e) => {
+                        setTavilyApiKey(e.target.value);
+                        if (e.target.value) setSearchProvider("tavily");
+                      }}
+                      placeholder="tvly-..."
+                      className="w-full mt-1.5 px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                    />
                   </div>
-
-                  {/* Tavily API Key */}
-                  {searchProvider === "tavily" && (
-                    <div>
-                      <label className="block text-sm text-text-secondary mb-1.5">
-                        Tavily API Key
-                      </label>
-                      <input
-                        type="password"
-                        value={tavilyApiKey}
-                        onChange={(e) => setTavilyApiKey(e.target.value)}
-                        placeholder="tvly-..."
-                        className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
-                      />
-                    </div>
-                  )}
-
-                  {/* Proactive Toggle */}
-                  <label className="flex items-center justify-between cursor-pointer">
-                    <div>
-                      <span className="text-sm text-text-primary block">
-                        Proactive Search
-                      </span>
-                      <span className="text-[11px] text-text-muted">
-                        Automatically search when tech topics are detected
-                      </span>
-                    </div>
-                    <Toggle checked={proactive} onChange={setProactive} />
-                  </label>
-                </>
-              )}
-            </div>
-          )}
-
-          {activeSection === "output" && (
-            <div className="space-y-5">
-              <h3 className="text-sm font-heading font-medium text-text-secondary uppercase tracking-wider">
-                Output
-              </h3>
-
-              {/* Include Conversation */}
-              <label className="flex items-center justify-between cursor-pointer">
-                <div>
-                  <span className="text-sm text-text-primary block">
-                    Include CONVERSATION.md
-                  </span>
-                  <span className="text-[11px] text-text-muted">
-                    Export the full chat history as a document
-                  </span>
-                </div>
-                <Toggle
-                  checked={includeConversation}
-                  onChange={setIncludeConversation}
-                />
-              </label>
+                )}
+              </div>
 
               {/* Default Save Path */}
               <div>
                 <label className="block text-sm text-text-secondary mb-1.5">
-                  Default Save Path
+                  Save Location
                 </label>
                 <input
                   type="text"
@@ -322,6 +217,249 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
                 />
               </div>
+
+              {/* Re-run Setup */}
+              <button
+                onClick={handleRerunSetup}
+                className="flex items-center gap-2 text-xs text-text-secondary hover:text-text-primary transition-colors cursor-pointer bg-transparent border border-border-default rounded-lg px-3 py-2"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Re-run Setup
+              </button>
+
+              {/* Advanced toggle */}
+              <button
+                onClick={() => setIsAdvanced(true)}
+                className="text-xs text-text-muted hover:text-accent-gold transition-colors cursor-pointer bg-transparent border-none underline"
+              >
+                Show advanced settings
+              </button>
+            </div>
+          ) : (
+            /* =================== ADVANCED MODE =================== */
+            <div className="space-y-5">
+              <button
+                onClick={() => setIsAdvanced(false)}
+                className="text-xs text-text-muted hover:text-accent-gold transition-colors cursor-pointer bg-transparent border-none underline mb-2"
+              >
+                &larr; Simple settings
+              </button>
+
+              {/* Section Tabs */}
+              <div className="flex gap-1">
+                {SECTIONS.map((s) => (
+                  <button
+                    key={s.key}
+                    onClick={() => setActiveSection(s.key)}
+                    className={`px-3 py-1.5 text-xs font-heading font-medium rounded-md transition-colors cursor-pointer border-none ${
+                      activeSection === s.key
+                        ? "bg-surface text-accent-gold"
+                        : "bg-transparent text-text-secondary hover:text-text-primary"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+
+              {activeSection === "llm" && (
+                <div className="space-y-5">
+                  <h3 className="text-sm font-heading font-medium text-text-secondary uppercase tracking-wider">
+                    Language Model
+                  </h3>
+
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1.5">
+                      Provider
+                    </label>
+                    <select
+                      value={llmProvider}
+                      onChange={(e) => setLlmProvider(e.target.value)}
+                      className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                    >
+                      <option value="ollama">Ollama (Local)</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="openai">OpenAI</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1.5">
+                      Model
+                    </label>
+                    <input
+                      type="text"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      placeholder="e.g. qwen3-coder:30b"
+                      className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1.5">
+                      Base URL
+                    </label>
+                    <input
+                      type="text"
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
+                      placeholder="http://localhost:11434"
+                      className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="flex items-center justify-between text-sm text-text-secondary mb-1.5">
+                      <span>Temperature</span>
+                      <span className="text-text-muted font-mono text-xs">
+                        {temperature.toFixed(1)}
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="2"
+                      step="0.1"
+                      value={temperature}
+                      onChange={(e) =>
+                        setTemperature(parseFloat(e.target.value))
+                      }
+                      className="w-full accent-accent-gold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1.5">
+                      Max Tokens
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={maxTokens}
+                      onChange={(e) =>
+                        setMaxTokens(Math.max(1, parseInt(e.target.value) || 1))
+                      }
+                      className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {activeSection === "search" && (
+                <div className="space-y-5">
+                  <h3 className="text-sm font-heading font-medium text-text-secondary uppercase tracking-wider">
+                    Web Search
+                  </h3>
+
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <span className="text-sm text-text-primary">
+                      Enable Web Search
+                    </span>
+                    <Toggle
+                      checked={searchEnabled}
+                      onChange={setSearchEnabled}
+                    />
+                  </label>
+
+                  {searchEnabled && (
+                    <>
+                      <div>
+                        <label className="block text-sm text-text-secondary mb-1.5">
+                          Provider
+                        </label>
+                        <select
+                          value={searchProvider}
+                          onChange={(e) => setSearchProvider(e.target.value)}
+                          className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                        >
+                          <option value="tavily">Tavily</option>
+                          <option value="duckduckgo">DuckDuckGo</option>
+                          <option value="searxng">SearXNG</option>
+                        </select>
+                      </div>
+
+                      {searchProvider === "tavily" && (
+                        <div>
+                          <label className="block text-sm text-text-secondary mb-1.5">
+                            Tavily API Key
+                          </label>
+                          <input
+                            type="password"
+                            value={tavilyApiKey}
+                            onChange={(e) => setTavilyApiKey(e.target.value)}
+                            placeholder="tvly-..."
+                            className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                          />
+                        </div>
+                      )}
+
+                      {searchProvider === "searxng" && (
+                        <div>
+                          <label className="block text-sm text-text-secondary mb-1.5">
+                            SearXNG URL
+                          </label>
+                          <input
+                            type="text"
+                            value={searxngUrl}
+                            onChange={(e) => setSearxngUrl(e.target.value)}
+                            placeholder="http://localhost:8080"
+                            className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                          />
+                        </div>
+                      )}
+
+                      <label className="flex items-center justify-between cursor-pointer">
+                        <div>
+                          <span className="text-sm text-text-primary block">
+                            Proactive Search
+                          </span>
+                          <span className="text-[11px] text-text-muted">
+                            Automatically search when tech topics are detected
+                          </span>
+                        </div>
+                        <Toggle checked={proactive} onChange={setProactive} />
+                      </label>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {activeSection === "output" && (
+                <div className="space-y-5">
+                  <h3 className="text-sm font-heading font-medium text-text-secondary uppercase tracking-wider">
+                    Output
+                  </h3>
+
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <div>
+                      <span className="text-sm text-text-primary block">
+                        Include CONVERSATION.md
+                      </span>
+                      <span className="text-[11px] text-text-muted">
+                        Export the full chat history as a document
+                      </span>
+                    </div>
+                    <Toggle
+                      checked={includeConversation}
+                      onChange={setIncludeConversation}
+                    />
+                  </label>
+
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1.5">
+                      Default Save Path
+                    </label>
+                    <input
+                      type="text"
+                      value={defaultSavePath}
+                      onChange={(e) => setDefaultSavePath(e.target.value)}
+                      placeholder="~/Projects"
+                      className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -347,7 +485,6 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   );
 }
 
-// Reusable toggle component
 function Toggle({
   checked,
   onChange,

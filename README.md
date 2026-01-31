@@ -32,6 +32,7 @@
 - [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
 - [Getting Started](#getting-started)
+- [Distribution](#distribution)
 - [Generated Output](#generated-output)
 - [Design Philosophy](#design-philosophy)
 - [Roadmap](#roadmap)
@@ -145,26 +146,29 @@ All IPC uses Tauri's type-safe command system. Streaming responses are delivered
 
 ## Getting Started
 
-### Prerequisites
+### Option A: Install the App (No Coding Required)
 
+1. Install [Ollama](https://ollama.com/download) and open it
+2. Download `AuraForge_0.1.0_aarch64.dmg` from the `distribution/` folder
+3. Drag AuraForge to Applications and open it
+4. Follow the setup wizard — it handles everything else
+
+See [`distribution/INSTALL.md`](distribution/INSTALL.md) for detailed instructions and [`distribution/QUICK_REFERENCE.md`](distribution/QUICK_REFERENCE.md) for keyboard shortcuts.
+
+### Option B: Build from Source
+
+**Prerequisites:**
 - **macOS** with Apple Silicon (Intel works too, just slower inference)
 - **Ollama** installed and running ([ollama.com](https://ollama.com))
 - **Node.js** 18+ and **Rust** 1.75+
 - _Optional:_ [Tavily API key](https://tavily.com) for higher-quality web search
 
-### Install Ollama and pull a model
-
 ```bash
-# Install Ollama (if not already)
+# Install Ollama and pull a model
 brew install ollama
-
-# Pull a recommended model
 ollama pull qwen3:30b
-```
 
-### Clone and run
-
-```bash
+# Clone and run
 git clone https://github.com/saagar210/auraforge.git
 cd auraforge
 npm install
@@ -173,7 +177,23 @@ npm run tauri dev
 
 ### First run
 
-AuraForge checks for Ollama connectivity and model availability on startup. If anything is missing, the onboarding modal walks you through setup. Once connected, start a new session and describe what you want to build.
+AuraForge checks for Ollama connectivity and model availability on startup. A setup wizard walks you through installing Ollama, downloading an AI model, and starting your first session. Once set up, describe what you want to build and AuraForge takes it from there.
+
+---
+
+## Distribution
+
+The `distribution/` folder contains a ready-to-share package for non-technical users:
+
+```
+distribution/
+├── AuraForge_0.1.0_aarch64.dmg   # macOS installer (Apple Silicon)
+├── INSTALL.md                      # Step-by-step install guide
+├── QUICK_REFERENCE.md              # Keyboard shortcuts & workflow cheat sheet
+└── README.md                       # What's in the folder
+```
+
+Share the entire folder with teammates. They only need to install Ollama and open the DMG — the in-app setup wizard handles model download and configuration.
 
 ---
 

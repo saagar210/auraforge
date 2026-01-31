@@ -115,3 +115,22 @@ export interface HealthStatus {
   config_valid: boolean;
   errors: string[];
 }
+
+// Model management
+export interface ModelPullProgress {
+  status: string;
+  total?: number;
+  completed?: number;
+}
+
+export interface DiskSpace {
+  available_gb: number;
+  sufficient: boolean;
+}
+
+// Onboarding
+export type OnboardingStep =
+  | "welcome"
+  | "install-ollama"
+  | "download-model"
+  | "ready";

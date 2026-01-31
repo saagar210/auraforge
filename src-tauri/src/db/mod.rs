@@ -307,6 +307,30 @@ impl Database {
             |row| row.get(0),
         )
     }
+
+    // ---- Preferences ----
+
+    pub fn get_preference(&self, key: &str) -> Result<Option<String>, rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        match conn.query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params![key],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(val) => Ok(Some(val)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn set_preference(&self, key: &str, value: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO preferences (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -506,5 +530,31 @@ mod tests {
     fn database_is_ok() {
         let db = test_db();
         assert!(db.is_ok());
+    }
+
+    // ---- Preference Tests ----
+
+    #[test]
+    fn set_and_get_preference() {
+        let db = test_db();
+        db.set_preference("theme", "dark").unwrap();
+        assert_eq!(db.get_preference("theme").unwrap(), Some("dark".to_string()));
+    }
+
+    #[test]
+    fn get_missing_preference_returns_none() {
+        let db = test_db();
+        assert_eq!(db.get_preference("nonexistent").unwrap(), None);
+    }
+
+    #[test]
+    fn overwrite_preference() {
+        let db = test_db();
+        db.set_preference("wizard_completed", "false").unwrap();
+        db.set_preference("wizard_completed", "true").unwrap();
+        assert_eq!(
+            db.get_preference("wizard_completed").unwrap(),
+            Some("true".to_string())
+        );
     }
 }

@@ -11,6 +11,8 @@ import type {
   HealthStatus,
   GeneratedDocument,
   GenerateProgress,
+  ModelPullProgress,
+  OnboardingStep,
 } from "../types";
 
 interface ChatState {
@@ -41,9 +43,19 @@ interface ChatState {
   healthStatus: HealthStatus | null;
   onboardingDismissed: boolean;
 
+  // Wizard / Onboarding
+  wizardCompleted: boolean;
+  wizardStep: OnboardingStep;
+  modelPullProgress: ModelPullProgress | null;
+  isModelPulling: boolean;
+  installedModels: string[];
+  isFirstSession: boolean;
+
   // UI
   showSettings: boolean;
   setShowSettings: (show: boolean) => void;
+  showHelp: boolean;
+  sidebarCollapsed: boolean;
 
   // Loading
   sessionsLoading: boolean;
@@ -60,6 +72,17 @@ interface ChatState {
   renameSession: (sessionId: string, name: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   clearStreamError: () => void;
+
+  // Wizard actions
+  loadPreferences: () => Promise<void>;
+  setWizardStep: (step: OnboardingStep) => void;
+  completeWizard: () => Promise<void>;
+  listModels: () => Promise<string[]>;
+  pullModel: (name: string) => Promise<void>;
+  cancelPullModel: () => Promise<void>;
+  setShowHelp: (show: boolean) => void;
+  toggleSidebar: () => void;
+  markFirstSessionComplete: () => Promise<void>;
 
   // Config actions
   loadConfig: () => Promise<AppConfig | null>;
@@ -108,7 +131,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   toast: null,
   healthStatus: null,
   onboardingDismissed: false,
+  wizardCompleted: false,
+  wizardStep: "welcome" as OnboardingStep,
+  modelPullProgress: null,
+  isModelPulling: false,
+  installedModels: [],
+  isFirstSession: true,
   showSettings: false,
+  showHelp: false,
+  sidebarCollapsed: false,
   sessionsLoading: false,
   messagesLoading: false,
   _unlisteners: [],
@@ -347,6 +378,85 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   clearStreamError: () => set({ streamError: null }),
 
+  loadPreferences: async () => {
+    try {
+      const wizardDone = await invoke<string | null>("get_preference", {
+        key: "wizard_completed",
+      });
+      const firstSessionDone = await invoke<string | null>("get_preference", {
+        key: "first_session_completed",
+      });
+      set({
+        wizardCompleted: wizardDone === "true",
+        onboardingDismissed: wizardDone === "true",
+        isFirstSession: firstSessionDone !== "true",
+      });
+    } catch (e) {
+      console.error("Failed to load preferences:", e);
+    }
+  },
+
+  setWizardStep: (step: OnboardingStep) => set({ wizardStep: step }),
+
+  completeWizard: async () => {
+    try {
+      await invoke("set_preference", {
+        key: "wizard_completed",
+        value: "true",
+      });
+      set({ wizardCompleted: true, onboardingDismissed: true });
+    } catch (e) {
+      console.error("Failed to complete wizard:", e);
+    }
+  },
+
+  listModels: async () => {
+    try {
+      const models = await invoke<string[]>("list_models");
+      set({ installedModels: models });
+      return models;
+    } catch (e) {
+      console.error("Failed to list models:", e);
+      return [];
+    }
+  },
+
+  pullModel: async (name: string) => {
+    set({ isModelPulling: true, modelPullProgress: null });
+    try {
+      await invoke("pull_model", { modelName: name });
+    } catch (e) {
+      console.error("Model pull failed:", e);
+      set({ isModelPulling: false });
+    }
+  },
+
+  cancelPullModel: async () => {
+    try {
+      await invoke("cancel_pull_model");
+      set({ isModelPulling: false, modelPullProgress: null });
+    } catch (e) {
+      console.error("Failed to cancel pull:", e);
+    }
+  },
+
+  setShowHelp: (show: boolean) => set({ showHelp: show }),
+
+  toggleSidebar: () =>
+    set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+
+  markFirstSessionComplete: async () => {
+    try {
+      await invoke("set_preference", {
+        key: "first_session_completed",
+        value: "true",
+      });
+      set({ isFirstSession: false });
+    } catch (e) {
+      console.error("Failed to mark first session complete:", e);
+    }
+  },
+
   loadConfig: async () => {
     try {
       return await invoke<AppConfig>("get_config");
@@ -520,6 +630,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ generateProgress: null });
     });
     unlisteners.push(unlComplete);
+
+    const unlPullProgress = await listen<ModelPullProgress>(
+      "model:pull_progress",
+      (event) => {
+        const progress = event.payload;
+        set({ modelPullProgress: progress });
+        if (
+          progress.status === "success" ||
+          progress.status === "cancelled" ||
+          progress.status.startsWith("error")
+        ) {
+          set({ isModelPulling: false });
+        }
+      },
+    );
+    unlisteners.push(unlPullProgress);
+
+    const unlMenu = await listen<string>("menu:action", (event) => {
+      const action = event.payload;
+      const store = get();
+      switch (action) {
+        case "new_session":
+          store.createSession();
+          break;
+        case "toggle_sidebar":
+          store.toggleSidebar();
+          break;
+        case "toggle_preview":
+          store.setShowPreview(!store.showPreview);
+          break;
+        case "help_panel":
+          store.setShowHelp(!store.showHelp);
+          break;
+      }
+    });
+    unlisteners.push(unlMenu);
 
     set({ _unlisteners: unlisteners });
   },

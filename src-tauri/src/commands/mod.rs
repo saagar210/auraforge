@@ -1,3 +1,4 @@
+use serde::Serialize;
 use tauri::{Emitter, State};
 
 use crate::config::save_config;
@@ -123,6 +124,87 @@ pub async fn update_config(
     }
     save_config(&config)?;
     Ok(config.clone())
+}
+
+// ============ PREFERENCES ============
+
+#[tauri::command]
+pub async fn get_preference(
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    state
+        .db
+        .get_preference(&key)
+        .map_err(|e| format!("Failed to get preference: {}", e))
+}
+
+#[tauri::command]
+pub async fn set_preference(
+    state: State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    state
+        .db
+        .set_preference(&key, &value)
+        .map_err(|e| format!("Failed to set preference: {}", e))
+}
+
+// ============ MODELS ============
+
+#[tauri::command]
+pub async fn list_models(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let config = state.config.lock().unwrap().clone();
+    state.ollama.list_models(&config.llm.base_url).await
+}
+
+#[tauri::command]
+pub async fn pull_model(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    model_name: String,
+) -> Result<(), String> {
+    let config = state.config.lock().unwrap().clone();
+    state
+        .ollama
+        .pull_model(&app, &config.llm.base_url, &model_name)
+        .await
+}
+
+#[tauri::command]
+pub async fn cancel_pull_model(state: State<'_, AppState>) -> Result<(), String> {
+    state.ollama.cancel_pull();
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiskSpace {
+    pub available_gb: f64,
+    pub sufficient: bool,
+}
+
+#[tauri::command]
+pub async fn check_disk_space() -> Result<DiskSpace, String> {
+    let output = std::process::Command::new("df")
+        .args(["-k", "/"])
+        .output()
+        .map_err(|e| format!("Failed to check disk space: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let available_kb: u64 = stdout
+        .lines()
+        .nth(1)
+        .and_then(|line| line.split_whitespace().nth(3))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    let available_gb = available_kb as f64 / 1_048_576.0;
+
+    Ok(DiskSpace {
+        available_gb,
+        sufficient: available_gb > 20.0,
+    })
 }
 
 // ============ SESSIONS ============

@@ -1,11 +1,76 @@
-import { Flame } from "lucide-react";
+import { Flame, ArrowRight } from "lucide-react";
 
 interface EmptyStateProps {
   hasSession: boolean;
   onNewProject: () => void;
+  isFirstSession?: boolean;
+  onSuggestionClick?: (text: string) => void;
 }
 
-export function EmptyState({ hasSession, onNewProject }: EmptyStateProps) {
+const SUGGESTIONS = [
+  "A SaaS web app",
+  "A mobile app",
+  "A CLI tool",
+];
+
+export function EmptyState({
+  hasSession,
+  onNewProject,
+  isFirstSession,
+  onSuggestionClick,
+}: EmptyStateProps) {
+  if (hasSession && isFirstSession) {
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 px-10 text-center">
+        <Flame
+          className="w-12 h-12 text-accent-glow/60 mb-4"
+          style={{ filter: "drop-shadow(0 0 15px rgba(232,160,69,0.3))" }}
+        />
+        <h2 className="text-lg font-heading font-semibold text-text-primary mb-3">
+          Here's how it works
+        </h2>
+
+        <div className="bg-surface rounded-xl px-5 py-4 mb-5 max-w-sm text-left space-y-2">
+          {[
+            ["1", "Tell your idea", "Describe what you want to build"],
+            ["2", "Answer questions", "I'll help you think through details"],
+            ["3", "Refine together", "We'll shape the plan through conversation"],
+            ["4", "Generate docs", "Get README, SPEC, and more to start coding"],
+          ].map(([num, title, desc]) => (
+            <div key={num} className="flex items-start gap-3">
+              <span className="text-xs font-mono text-accent-gold mt-0.5 shrink-0 w-4 text-center">
+                {num}
+              </span>
+              <div>
+                <span className="text-sm text-text-primary font-medium">
+                  {title}
+                </span>
+                <span className="text-xs text-text-muted block">{desc}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-sm text-text-secondary mb-3">
+          What are you thinking about building?
+        </p>
+
+        <div className="flex flex-wrap gap-2 justify-center">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => onSuggestionClick?.(s)}
+              className="px-3 py-1.5 bg-surface border border-border-default rounded-full text-xs text-text-secondary hover:text-accent-gold hover:border-accent-gold/40 transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              {s}
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (hasSession) {
     return (
       <div className="flex flex-col items-center justify-center flex-1 px-10 text-center">
