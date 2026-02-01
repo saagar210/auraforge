@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from "react";
 import { Flame, Trash2, MessageSquare, Settings, HelpCircle } from "lucide-react";
 import { clsx } from "clsx";
 import { useChatStore } from "../stores/chatStore";
-import { SettingsPanel } from "./SettingsPanel";
 
 export function Sidebar() {
   const {
@@ -11,7 +10,6 @@ export function Sidebar() {
     createSession,
     selectSession,
     deleteSession,
-    showSettings,
     setShowSettings,
     setShowHelp,
     sidebarCollapsed,
@@ -169,10 +167,6 @@ export function Sidebar() {
         </button>
       </div>
 
-      <SettingsPanel
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-      />
     </aside>
   );
 }

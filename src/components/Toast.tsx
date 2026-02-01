@@ -27,7 +27,7 @@ export function Toast({ message, type, action, onDismiss }: ToastProps) {
 
   return (
     <div
-      className="fixed bottom-6 right-6 z-50 animate-[toast-in_0.3s_ease]"
+      className="fixed bottom-6 right-6 z-70 animate-[toast-in_0.3s_ease]"
       role="alert"
       aria-live="polite"
     >

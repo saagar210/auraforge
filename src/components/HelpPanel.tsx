@@ -10,7 +10,7 @@ export function HelpPanel({ open, onClose }: HelpPanelProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50"
+      className="fixed inset-0 z-40"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div

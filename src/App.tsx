@@ -16,6 +16,7 @@ import { ForgingProgress } from "./components/ForgingProgress";
 import { DocumentPreview } from "./components/DocumentPreview";
 import { EmptyState } from "./components/EmptyState";
 import { OnboardingWizard } from "./components/OnboardingWizard";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { HelpPanel } from "./components/HelpPanel";
 import { InfoTooltip } from "./components/InfoTooltip";
 import { Toast } from "./components/Toast";
@@ -532,6 +533,12 @@ function App() {
 
       {/* Help Panel */}
       <HelpPanel open={showHelp} onClose={() => setShowHelp(false)} />
+
+      {/* Settings Panel */}
+      <SettingsPanel
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
 
       {/* Onboarding Wizard */}
       {showOnboarding && healthStatus && <OnboardingWizard />}

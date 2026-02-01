@@ -155,7 +155,7 @@ export function OnboardingWizard() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center animate-[fade-in_0.2s_ease]"
+      className="fixed inset-0 z-60 flex items-center justify-center animate-[fade-in_0.2s_ease]"
       style={{
         background: "rgba(0, 0, 0, 0.85)",
         backdropFilter: "blur(12px)",
