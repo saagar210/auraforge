@@ -18,7 +18,7 @@
   <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/Rust-2021_Edition-DEA584?logo=rust&logoColor=white" alt="Rust" /></a>
   <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/TypeScript-Strict-3178C6?logo=typescript&logoColor=white" alt="TypeScript Strict" /></a>
   <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/Tailwind_CSS-4.0-38BDF8?logo=tailwindcss&logoColor=white" alt="Tailwind CSS 4" /></a>
-  <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/Tests-39_passing-brightgreen" alt="39 Tests Passing" /></a>
+  <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/Tests-41_passing-brightgreen" alt="41 Tests Passing" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License" /></a>
 </p>
 
@@ -52,7 +52,7 @@ The gap between idea and execution-ready plan is where most projects stall.
 
 ## What AuraForge Does
 
-AuraForge is a planning partner that thinks with you, not for you. You describe what you want to build. It asks hard questions, challenges weak assumptions, and grounds decisions in current best practices via live web search. When the plan is solid, it generates five production-ready documents that you drop into your project and start building immediately.
+AuraForge is a planning partner that thinks with you, not for you. You describe what you want to build. It asks hard questions, challenges weak assumptions, and grounds decisions in current best practices via live web search. When the plan is solid, it generates six production-ready documents that you drop into your project and start building immediately.
 
 **The key insight:** the output isn't advice — it's artifacts. A spec your AI coding tool can follow. Prompts broken into phases. A conversation log so you remember _why_ you made each decision.
 
@@ -63,20 +63,21 @@ AuraForge is a planning partner that thinks with you, not for you. You describe 
 | **1. Describe your idea** | Start a new session and explain what you want to build in plain language. |
 | **2. Refine through dialogue** | AuraForge asks clarifying questions — scope, tech choices, trade-offs. Web search provides current context automatically when it detects technical topics. |
 | **3. Converge on decisions** | The conversation narrows from broad idea to concrete plan. Tech stack, architecture, phases — all decided collaboratively. |
-| **4. Forge the plan** | After 3+ exchanges, click **Forge the Plan** to generate all five documents from your conversation. |
-| **5. Save and build** | Export to a folder. Drop `CLAUDE.md` in your project root. Follow `PROMPTS.md` phase by phase. |
+| **4. Forge the plan** | After 3+ exchanges, click **Forge the Plan** to generate all six documents from your conversation. |
+| **5. Save and build** | Export to a folder. Open `START_HERE.md` for setup instructions. Drop `CLAUDE.md` in your project root. Follow `PROMPTS.md` phase by phase. |
 
-### The Five Documents
+### The Six Documents
 
 | Document | Purpose |
 |----------|---------|
-| **SPEC.md** | Complete technical specification — data models, API surface, architecture decisions, edge cases. |
-| **CLAUDE.md** | Project context file for Claude Code. Drop it in your repo root and Claude understands your entire project. |
-| **PROMPTS.md** | Phased implementation prompts, scoped and self-contained. Copy, paste, build. |
-| **README.md** | Orientation guide — what's in the folder, key decisions, where to start. |
+| **START_HERE.md** | Quick-start bridge document — prerequisites, step-by-step setup, your first prompt to paste into Claude Code. Read this first. |
+| **SPEC.md** | Complete technical specification — data models, interface contracts in real language, acceptance criteria, [TBD] markers for undiscussed topics. |
+| **CLAUDE.md** | Project context file for Claude Code. Drop it in your repo root and Claude understands your entire project. Includes anti-patterns section. |
+| **PROMPTS.md** | Phased implementation prompts with complexity indicators, watch-out sections, and cross-references to SPEC.md + CLAUDE.md. |
+| **README.md** | Planning folder orientation — what's here, key decisions, known gaps. |
 | **CONVERSATION.md** | Full planning transcript generated directly from session data (no LLM needed). Revisit to understand _why_ decisions were made. |
 
-Every document is generated from your specific conversation, referencing your chosen tech stack, architecture, and requirements — not templates or boilerplate.
+Documents are generated sequentially with cross-referencing — each document receives all previously generated documents as context, ensuring consistency across the entire output.
 
 ---
 
@@ -88,8 +89,8 @@ Natural dialogue powered by Ollama's local LLM inference. Responses stream token
 ### Grounded in Reality via Web Search
 Three search providers with automatic failover: **DuckDuckGo** (free, HTML scraping with multi-selector fallback), **Tavily** (API-based, higher quality), and **SearXNG** (self-hosted). Search triggers automatically when the conversation involves technical topics — detected by matching against 46 technology keywords and 25 trigger patterns. Results are injected as system context so the LLM can reference current versions, best practices, and real-world trade-offs.
 
-### Five-Document Generation Pipeline
-Sequential generation with per-document progress events. Each document uses a specialized prompt template. Output validation retries once if a document doesn't start with a proper heading (`#`). Documents are stored atomically — old versions are deleted and new ones inserted in a single database transaction. Staleness detection compares the latest message timestamp against document generation time.
+### Six-Document Generation Pipeline with Cross-Referencing
+Sequential generation in dependency order: SPEC → CLAUDE → PROMPTS → README → START_HERE. Each document receives all previously generated documents as context, enabling cross-referencing (e.g., PROMPTS.md references exact conventions from CLAUDE.md). Prompts include negative/positive examples, tech stack consistency checks, and information categorization (Decided/Implied/Unknown). Output validation retries once if a document doesn't start with a proper heading (`#`). Documents are stored atomically — old versions are deleted and new ones inserted in a single database transaction. Staleness detection compares the latest message timestamp against document generation time.
 
 ### Local-First and Private
 All data stays on your machine. Conversations live in a local SQLite database with WAL mode. Config is stored as YAML in `~/.auraforge/`. The only network calls are to your local Ollama instance and (optionally) web search providers. No telemetry, no cloud sync, no API keys required to get started.
@@ -210,7 +211,8 @@ When you click **Forge the Plan** (available after 3+ exchanges), AuraForge crea
 
 ```
 my-project-plan/
-├── README.md           # Orientation — what's here, where to start
+├── START_HERE.md       # Quick-start guide — read this first
+├── README.md           # Planning folder orientation
 ├── SPEC.md             # Technical specification
 ├── CLAUDE.md           # Project context for Claude Code
 ├── PROMPTS.md          # Phased implementation prompts
@@ -225,16 +227,16 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 
 | Metric | Result |
 |--------|--------|
-| `cargo test` | **39/39 passing** |
+| `cargo test` | **41/41 passing** |
 | `cargo clippy -- -D warnings` | **0 warnings** |
 | `npx tsc --noEmit` | **0 errors** |
 | `npm run tauri build` | **Produces .app + .dmg** |
 | Source lines | **~8,067** across Rust, TypeScript, and CSS |
-| Rust test coverage | Config parsing, DB operations, search trigger detection (36 cases), URL extraction, model matching, message deletion |
+| Rust test coverage | Config parsing, DB operations, search trigger detection (18 cases), URL extraction, model matching, message deletion |
 
 ### What's Tested
 
-- **Search trigger detection:** 36 unit tests covering technology keywords, question patterns, comparison queries, version lookups, and negative cases
+- **Search trigger detection:** 18 unit tests covering technology keywords, question patterns, comparison queries, version lookups, and negative cases
 - **Database operations:** Session CRUD, message cascade deletion, document atomic replacement, assistant message deletion on retry
 - **Config handling:** YAML round-trip, default generation, corruption recovery
 - **URL extraction:** DuckDuckGo redirect URL parsing (`uddg=` parameter extraction)
