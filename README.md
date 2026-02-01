@@ -144,7 +144,7 @@ A dark, atmospheric UI built around the metaphor of crafting. Ember particles dr
 
 | Layer | Technology | Role |
 |-------|-----------|------|
-| **Desktop Runtime** | [Tauri 2.0](https://tauri.app) | ~5 MB binary, native OS integration, Rust-powered IPC |
+| **Desktop Runtime** | [Tauri 2.0](https://tauri.app) | ~6.7 MB installer (vs ~150 MB for Electron), native OS integration, Rust-powered IPC |
 | **Frontend** | [React 19](https://react.dev) | Component-driven UI with streaming state management |
 | **State** | [Zustand 5](https://zustand.docs.pmnd.rs) | Single-store architecture, no provider wrapping |
 | **Backend** | [Rust 2021](https://www.rust-lang.org) | Memory-safe backend with async Tokio runtime |
@@ -162,7 +162,7 @@ A dark, atmospheric UI built around the metaphor of crafting. Ember particles dr
 ### Option A: Install the App
 
 1. Install [Ollama](https://ollama.com/download) and open it
-2. Download `AuraForge_0.1.0_aarch64.dmg` from the [`distribution/`](distribution/) folder
+2. Download the latest `.dmg` from [**Releases**](https://github.com/saagar210/auraforge/releases/latest)
 3. Drag AuraForge to Applications and open it
 4. Follow the setup wizard — it handles model download and configuration
 
@@ -179,7 +179,7 @@ See [`distribution/INSTALL.md`](distribution/INSTALL.md) for detailed instructio
 ```bash
 # Install Ollama and pull the default model
 brew install ollama
-ollama pull qwen3:30b
+ollama pull qwen3-coder:30b-a3b-instruct-q4_K_M
 
 # Clone and run
 git clone https://github.com/saagar210/auraforge.git
@@ -229,7 +229,7 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 | `cargo clippy -- -D warnings` | **0 warnings** |
 | `npx tsc --noEmit` | **0 errors** |
 | `npm run tauri build` | **Produces .app + .dmg** |
-| Source lines | **~8,000** across Rust, TypeScript, and CSS |
+| Source lines | **~8,067** across Rust, TypeScript, and CSS |
 | Rust test coverage | Config parsing, DB operations, search trigger detection (36 cases), URL extraction, model matching, message deletion |
 
 ### What's Tested
