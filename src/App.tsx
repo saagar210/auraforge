@@ -45,6 +45,7 @@ function App() {
     messagesLoading,
     documents,
     isGenerating,
+    _generatingSessionId,
     generateProgress,
     documentsStale,
     showPreview,
@@ -146,13 +147,14 @@ function App() {
     }
     return { userMessageCount: users, assistantMessageCount: assistants };
   }, [messages]);
+  const isCurrentSessionGenerating = isGenerating && _generatingSessionId === currentSessionId;
   const canForge = useMemo(
     () =>
       userMessageCount >= 3 &&
       assistantMessageCount >= 3 &&
       !isStreaming &&
-      !isGenerating,
-    [assistantMessageCount, isGenerating, isStreaming, userMessageCount],
+      !isCurrentSessionGenerating,
+    [assistantMessageCount, isCurrentSessionGenerating, isStreaming, userMessageCount],
   );
   const hasDocuments = documents.length > 0;
   const hasOlderMessages = messages.length > visibleCount;
@@ -382,7 +384,7 @@ function App() {
                 documents={documents}
                 stale={documentsStale}
                 onRegenerate={generateDocuments}
-                regenerating={isGenerating}
+                regenerating={isCurrentSessionGenerating}
                 onSave={handleSaveToFolder}
               />
             ) : (
@@ -435,7 +437,7 @@ function App() {
                         )}
 
                         {/* Forging progress */}
-                        {isGenerating && generateProgress && (
+                        {isCurrentSessionGenerating && generateProgress && (
                           <ForgingProgress
                             current={generateProgress.current}
                             total={generateProgress.total}
@@ -449,7 +451,7 @@ function App() {
                             <ForgeButton
                               onClick={generateDocuments}
                               disabled={!canForge}
-                              generating={isGenerating}
+                              generating={isCurrentSessionGenerating}
                             />
                             <InfoTooltip text="Generates 5 planning documents from your conversation" />
                           </div>
@@ -500,7 +502,7 @@ function App() {
                 {/* Chat Input */}
                 <ChatInput
                   onSend={handleSend}
-                  disabled={isStreaming || isGenerating}
+                  disabled={isStreaming || isCurrentSessionGenerating}
                   onCancel={cancelResponse}
                   isStreaming={isStreaming}
                   value={inputValue}

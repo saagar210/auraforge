@@ -103,6 +103,13 @@ pub struct GenerateProgress {
     pub current: usize,
     pub total: usize,
     pub filename: String,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GenerateComplete {
+    pub session_id: String,
+    pub count: usize,
 }
 
 impl Default for AppConfig {

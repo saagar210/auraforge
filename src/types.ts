@@ -65,6 +65,12 @@ export interface GenerateProgress {
   current: number;
   total: number;
   filename: string;
+  session_id: string;
+}
+
+export interface GenerateComplete {
+  session_id: string;
+  count: number;
 }
 
 export interface GenerateDocumentsRequest {

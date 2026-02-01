@@ -20,6 +20,7 @@ export function Sidebar() {
     selectSession,
     deleteSession,
     deleteSessions,
+    renameSession,
     setShowSettings,
     setShowHelp,
     sidebarCollapsed,
@@ -31,6 +32,11 @@ export function Sidebar() {
   // Select mode state
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Inline rename state
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     return () => {
@@ -96,6 +102,33 @@ export function Sidebar() {
     setSelectMode(false);
     setSelectedIds(new Set());
   }, [selectedIds, deleteSessions]);
+
+  const startRename = useCallback(
+    (e: React.MouseEvent, session: { id: string; name: string }) => {
+      e.stopPropagation();
+      if (selectMode) return;
+      setRenamingId(session.id);
+      setEditName(session.name);
+      // Auto-focus + select-all happens via onMount effect on the input
+    },
+    [selectMode],
+  );
+
+  const commitRename = useCallback(
+    async (sessionId: string) => {
+      const trimmed = editName.trim();
+      const session = sessions.find((s) => s.id === sessionId);
+      if (trimmed && session && trimmed !== session.name) {
+        await renameSession(sessionId, trimmed);
+      }
+      setRenamingId(null);
+    },
+    [editName, sessions, renameSession],
+  );
+
+  const cancelRename = useCallback(() => {
+    setRenamingId(null);
+  }, []);
 
   const formatTimestamp = (ts: string) => {
     try {
@@ -250,9 +283,33 @@ export function Sidebar() {
                     />
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-text-primary truncate font-medium">
-                      {session.name}
-                    </div>
+                    {renamingId === session.id ? (
+                      <input
+                        ref={renameInputRef}
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            commitRename(session.id);
+                          } else if (e.key === "Escape") {
+                            cancelRename();
+                          }
+                        }}
+                        onBlur={() => commitRename(session.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full text-sm text-text-primary font-medium bg-transparent border border-accent-gold/60 rounded px-1 py-0 outline-none focus:border-accent-glow"
+                        autoFocus
+                        onFocus={(e) => e.target.select()}
+                      />
+                    ) : (
+                      <div
+                        className="text-sm text-text-primary truncate font-medium"
+                        onDoubleClick={(e) => startRename(e, session)}
+                      >
+                        {session.name}
+                      </div>
+                    )}
                     <div className="text-[11px] text-text-muted mt-0.5">
                       {formatTimestamp(session.updated_at)}
                     </div>

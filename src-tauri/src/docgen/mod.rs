@@ -5,7 +5,7 @@ use tauri::Emitter;
 use crate::error::AppError;
 use crate::llm::ChatMessage;
 use crate::state::AppState;
-use crate::types::{GenerateProgress, GeneratedDocument, Message, Session};
+use crate::types::{GenerateComplete, GenerateProgress, GeneratedDocument, Message, Session};
 
 use prompts::*;
 
@@ -59,6 +59,7 @@ pub async fn generate_all_documents(
                 current: i + 1,
                 total,
                 filename: filename.to_string(),
+                session_id: session_id.to_string(),
             },
         );
 
@@ -121,6 +122,7 @@ pub async fn generate_all_documents(
                 current: total,
                 total,
                 filename: "CONVERSATION.md".to_string(),
+                session_id: session_id.to_string(),
             },
         );
 
@@ -133,7 +135,13 @@ pub async fn generate_all_documents(
         .replace_documents(session_id, &drafts)
         .map_err(AppError::from)?;
 
-    let _ = app.emit("generate:complete", documents.len());
+    let _ = app.emit(
+        "generate:complete",
+        GenerateComplete {
+            session_id: session_id.to_string(),
+            count: documents.len(),
+        },
+    );
 
     Ok(documents)
 }

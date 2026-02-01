@@ -13,6 +13,7 @@ import type {
   HealthStatus,
   GeneratedDocument,
   GenerateProgress,
+  GenerateComplete,
   ModelPullProgress,
   OnboardingStep,
 } from "../types";
@@ -293,8 +294,6 @@ export const useChatStore = create<ChatState>((set, get) => {
       documents: [],
       showPreview: false,
       documentsStale: false,
-      isGenerating: false,
-      generateProgress: null,
     });
     try {
       const messages = await invoke<Message[]>("get_messages", {
@@ -591,19 +590,33 @@ export const useChatStore = create<ChatState>((set, get) => {
       const documents = await invoke<GeneratedDocument[]>("generate_documents", {
         request: { session_id: sessionId },
       });
-      set({
-        documents,
-        isGenerating: false,
-        generateProgress: null,
-        documentsStale: false,
-        showPreview: true,
-      });
+      // If user is still on the same session, show the documents
+      if (get().currentSessionId === sessionId) {
+        set({
+          documents,
+          isGenerating: false,
+          generateProgress: null,
+          documentsStale: false,
+          showPreview: true,
+          _generatingSessionId: null,
+        });
+      } else {
+        // User switched away — docs are in DB, loadDocuments() will pick them up on navigate-back
+        set({
+          isGenerating: false,
+          generateProgress: null,
+          _generatingSessionId: null,
+        });
+      }
     } catch (e) {
       console.error("Failed to generate documents:", e);
       set({
         isGenerating: false,
         generateProgress: null,
-        streamError: `Document generation failed: ${normalizeError(e)}`,
+        _generatingSessionId: null,
+        streamError: get().currentSessionId === sessionId
+          ? `Document generation failed: ${normalizeError(e)}`
+          : null,
       });
     }
   },
@@ -745,18 +758,19 @@ export const useChatStore = create<ChatState>((set, get) => {
     const unlProgress = await listen<GenerateProgress>(
       "generate:progress",
       (event) => {
-        // Only update if we're still on the session that started generation
+        const { session_id } = event.payload;
         const genSession = get()._generatingSessionId;
-        if (genSession && genSession !== get().currentSessionId) return;
+        // Only update UI if this event matches our generating session AND we're viewing it
+        if (session_id !== genSession || session_id !== get().currentSessionId) return;
         set({ generateProgress: event.payload });
       },
     );
     unlisteners.push(unlProgress);
 
-    const unlComplete = await listen<number>("generate:complete", () => {
-      // Only update if we're still on the session that started generation
+    const unlComplete = await listen<GenerateComplete>("generate:complete", (event) => {
+      const { session_id } = event.payload;
       const genSession = get()._generatingSessionId;
-      if (genSession && genSession !== get().currentSessionId) return;
+      if (session_id !== genSession) return;
       set({ generateProgress: null, _generatingSessionId: null });
     });
     unlisteners.push(unlComplete);
