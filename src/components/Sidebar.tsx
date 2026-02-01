@@ -1,5 +1,14 @@
-import { useState, useRef, useEffect } from "react";
-import { Flame, Trash2, MessageSquare, Settings, HelpCircle } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import {
+  Flame,
+  Trash2,
+  MessageSquare,
+  Settings,
+  HelpCircle,
+  CheckSquare,
+  Square,
+  XCircle,
+} from "lucide-react";
 import { clsx } from "clsx";
 import { useChatStore } from "../stores/chatStore";
 
@@ -10,6 +19,7 @@ export function Sidebar() {
     createSession,
     selectSession,
     deleteSession,
+    deleteSessions,
     setShowSettings,
     setShowHelp,
     sidebarCollapsed,
@@ -18,11 +28,23 @@ export function Sidebar() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Select mode state
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     return () => {
       if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
     };
   }, []);
+
+  // Exit select mode if sessions drop below 2
+  useEffect(() => {
+    if (selectMode && sessions.length < 2) {
+      setSelectMode(false);
+      setSelectedIds(new Set());
+    }
+  }, [sessions.length, selectMode]);
 
   const handleDelete = async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
@@ -36,6 +58,44 @@ export function Sidebar() {
       deleteTimerRef.current = setTimeout(() => setConfirmDeleteId(null), 3000);
     }
   };
+
+  const toggleSelection = useCallback((sessionId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) {
+        next.delete(sessionId);
+      } else {
+        next.add(sessionId);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === sessions.length) {
+        return new Set();
+      }
+      return new Set(sessions.map((s) => s.id));
+    });
+  }, [sessions]);
+
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleBatchDelete = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    const confirmed = window.confirm(
+      `Delete ${count} project${count > 1 ? "s" : ""}? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+    await deleteSessions(Array.from(selectedIds));
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, [selectedIds, deleteSessions]);
 
   const formatTimestamp = (ts: string) => {
     try {
@@ -60,6 +120,8 @@ export function Sidebar() {
     return null;
   }
 
+  const allSelected = sessions.length > 0 && selectedIds.size === sessions.length;
+
   return (
     <aside
       className="w-[260px] min-w-[260px] bg-elevated border-r border-border-subtle flex flex-col h-full relative z-10"
@@ -77,15 +139,54 @@ export function Sidebar() {
         </span>
       </div>
 
-      {/* New Project Button */}
+      {/* Action Bar */}
       <div className="px-3 pt-3 pb-1">
-        <button
-          onClick={() => createSession()}
-          aria-label="Create new project"
-          className="w-full px-4 py-2.5 border border-accent-gold rounded-lg text-accent-gold font-heading text-sm font-medium cursor-pointer transition-all duration-300 hover:bg-accent-gold/10 hover:shadow-glow active:scale-[0.98] bg-transparent"
-        >
-          + New Project
-        </button>
+        {selectMode ? (
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={toggleSelectAll}
+              aria-label={allSelected ? "Deselect all" : "Select all"}
+              className="flex-1 px-3 py-2 rounded-lg text-text-secondary text-xs font-medium cursor-pointer transition-all duration-200 hover:bg-surface bg-transparent border border-border-subtle"
+            >
+              {allSelected ? "Deselect All" : "Select All"}
+            </button>
+            {selectedIds.size > 0 && (
+              <button
+                onClick={handleBatchDelete}
+                aria-label={`Delete ${selectedIds.size} selected`}
+                className="flex-1 px-3 py-2 rounded-lg text-status-error text-xs font-medium cursor-pointer transition-all duration-200 hover:bg-status-error/10 bg-transparent border border-status-error/40"
+              >
+                Delete ({selectedIds.size})
+              </button>
+            )}
+            <button
+              onClick={exitSelectMode}
+              aria-label="Exit select mode"
+              className="shrink-0 p-2 rounded-lg text-text-muted cursor-pointer transition-all duration-200 hover:text-text-primary hover:bg-surface bg-transparent border-none"
+            >
+              <XCircle className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => createSession()}
+              aria-label="Create new project"
+              className="flex-1 px-4 py-2.5 border border-accent-gold rounded-lg text-accent-gold font-heading text-sm font-medium cursor-pointer transition-all duration-300 hover:bg-accent-gold/10 hover:shadow-glow active:scale-[0.98] bg-transparent"
+            >
+              + New Project
+            </button>
+            {sessions.length >= 2 && (
+              <button
+                onClick={() => setSelectMode(true)}
+                aria-label="Enter select mode"
+                className="shrink-0 p-2.5 rounded-lg text-text-muted cursor-pointer transition-all duration-200 hover:text-text-primary hover:bg-surface bg-transparent border border-border-subtle"
+              >
+                <CheckSquare className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Session List */}
@@ -95,56 +196,89 @@ export function Sidebar() {
             <p className="text-text-muted text-xs">No projects yet</p>
           </div>
         ) : (
-          sessions.map((session) => (
-            <button
-              key={session.id}
-              onClick={() => selectSession(session.id)}
-              aria-label={`Select project: ${session.name}`}
-              aria-current={session.id === currentSessionId ? "true" : undefined}
-              className={clsx(
-                "w-full text-left px-3 py-2.5 my-0.5 rounded-lg border transition-all duration-200 cursor-pointer group",
-                session.id === currentSessionId
-                  ? "bg-warm border-l-[3px] border-l-accent-glow border-t-transparent border-r-transparent border-b-transparent shadow-glow"
-                  : "bg-transparent border-transparent hover:bg-surface hover:border-border-subtle",
-              )}
-            >
-              <div className="flex items-start gap-2">
-                <MessageSquare
-                  className={clsx(
-                    "w-4 h-4 mt-0.5 shrink-0",
-                    session.id === currentSessionId
-                      ? "text-accent-glow"
-                      : "text-text-muted",
+          sessions.map((session) => {
+            const isSelected = selectedIds.has(session.id);
+            return (
+              <button
+                key={session.id}
+                onClick={
+                  selectMode
+                    ? () => toggleSelection(session.id)
+                    : () => selectSession(session.id)
+                }
+                aria-label={
+                  selectMode
+                    ? `${isSelected ? "Deselect" : "Select"}: ${session.name}`
+                    : `Select project: ${session.name}`
+                }
+                aria-current={
+                  !selectMode && session.id === currentSessionId
+                    ? "true"
+                    : undefined
+                }
+                className={clsx(
+                  "w-full text-left px-3 py-2.5 my-0.5 rounded-lg border transition-all duration-200 cursor-pointer group",
+                  selectMode && isSelected
+                    ? "bg-accent-gold/10 border-accent-gold/40"
+                    : !selectMode && session.id === currentSessionId
+                      ? "bg-warm border-l-[3px] border-l-accent-glow border-t-transparent border-r-transparent border-b-transparent shadow-glow"
+                      : "bg-transparent border-transparent hover:bg-surface hover:border-border-subtle",
+                )}
+              >
+                <div className="flex items-start gap-2">
+                  {selectMode ? (
+                    isSelected ? (
+                      <CheckSquare
+                        className="w-4 h-4 mt-0.5 shrink-0 text-accent-glow"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <Square
+                        className="w-4 h-4 mt-0.5 shrink-0 text-text-muted"
+                        aria-hidden="true"
+                      />
+                    )
+                  ) : (
+                    <MessageSquare
+                      className={clsx(
+                        "w-4 h-4 mt-0.5 shrink-0",
+                        session.id === currentSessionId
+                          ? "text-accent-glow"
+                          : "text-text-muted",
+                      )}
+                      aria-hidden="true"
+                    />
                   )}
-                  aria-hidden="true"
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-text-primary truncate font-medium">
-                    {session.name}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-text-primary truncate font-medium">
+                      {session.name}
+                    </div>
+                    <div className="text-[11px] text-text-muted mt-0.5">
+                      {formatTimestamp(session.updated_at)}
+                    </div>
                   </div>
-                  <div className="text-[11px] text-text-muted mt-0.5">
-                    {formatTimestamp(session.updated_at)}
-                  </div>
+                  {!selectMode && (
+                    <button
+                      onClick={(e) => handleDelete(e, session.id)}
+                      aria-label={
+                        confirmDeleteId === session.id
+                          ? `Confirm delete: ${session.name}`
+                          : `Delete project: ${session.name}`
+                      }
+                      className={clsx(
+                        "shrink-0 p-1 rounded transition-all duration-200 bg-transparent border-none cursor-pointer",
+                        confirmDeleteId === session.id
+                          ? "text-status-error opacity-100"
+                          : "text-text-muted opacity-0 group-hover:opacity-100 hover:text-status-error",
+                      )}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
-                <button
-                  onClick={(e) => handleDelete(e, session.id)}
-                  aria-label={
-                    confirmDeleteId === session.id
-                      ? `Confirm delete: ${session.name}`
-                      : `Delete project: ${session.name}`
-                  }
-                  className={clsx(
-                    "shrink-0 p-1 rounded transition-all duration-200 bg-transparent border-none cursor-pointer",
-                    confirmDeleteId === session.id
-                      ? "text-status-error opacity-100"
-                      : "text-text-muted opacity-0 group-hover:opacity-100 hover:text-status-error",
-                  )}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </button>
-          ))
+              </button>
+            );
+          })
         )}
       </nav>
 

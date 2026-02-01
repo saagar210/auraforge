@@ -350,6 +350,14 @@ pub async fn delete_session(
     state.db.delete_session(&session_id).map_err(to_response)
 }
 
+#[tauri::command]
+pub async fn delete_sessions(
+    state: State<'_, AppState>,
+    session_ids: Vec<String>,
+) -> Result<usize, ErrorResponse> {
+    state.db.delete_sessions(&session_ids).map_err(to_response)
+}
+
 // ============ MESSAGES ============
 
 #[tauri::command]

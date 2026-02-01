@@ -77,6 +77,7 @@ interface ChatState {
   createSession: () => Promise<Session | null>;
   selectSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
+  deleteSessions: (sessionIds: string[]) => Promise<void>;
   renameSession: (sessionId: string, name: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   cancelResponse: () => Promise<void>;
@@ -334,6 +335,36 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     } catch (e) {
       console.error("Failed to delete session:", e);
+    }
+  },
+
+  deleteSessions: async (sessionIds: string[]) => {
+    if (sessionIds.length === 0) return;
+    try {
+      await invoke("delete_sessions", { session_ids: sessionIds });
+      const deletedSet = new Set(sessionIds);
+      set((state) => {
+        const sessions = state.sessions.filter((s) => !deletedSet.has(s.id));
+        const activeDeleted = state.currentSessionId
+          ? deletedSet.has(state.currentSessionId)
+          : false;
+        const newCurrentId = activeDeleted
+          ? sessions[0]?.id ?? null
+          : state.currentSessionId;
+        return {
+          sessions,
+          currentSessionId: newCurrentId,
+          messages: activeDeleted ? [] : state.messages,
+          documents: activeDeleted ? [] : state.documents,
+          showPreview: activeDeleted ? false : state.showPreview,
+        };
+      });
+      const newId = get().currentSessionId;
+      if (newId) {
+        get().selectSession(newId);
+      }
+    } catch (e) {
+      console.error("Failed to delete sessions:", e);
     }
   },
 

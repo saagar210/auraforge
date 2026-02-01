@@ -180,6 +180,7 @@ pub fn run() {
             commands::get_session,
             commands::update_session,
             commands::delete_session,
+            commands::delete_sessions,
             commands::get_messages,
             commands::send_message,
             commands::cancel_response,

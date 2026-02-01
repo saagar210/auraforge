@@ -155,6 +155,17 @@ impl Database {
         Ok(())
     }
 
+    pub fn delete_sessions(&self, session_ids: &[String]) -> Result<usize, rusqlite::Error> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let mut deleted = 0usize;
+        for id in session_ids {
+            deleted += tx.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
+        }
+        tx.commit()?;
+        Ok(deleted)
+    }
+
     fn read_session_row(conn: &Connection, id: &str) -> Result<Session, rusqlite::Error> {
         conn.query_row(
             "SELECT id, name, description, status, created_at, updated_at FROM sessions WHERE id = ?1",
@@ -654,5 +665,41 @@ mod tests {
             db.get_preference("wizard_completed").unwrap(),
             Some("true".to_string())
         );
+    }
+
+    #[test]
+    fn delete_sessions_batch() {
+        let db = test_db();
+        let s1 = db.create_session(Some("One")).unwrap();
+        let s2 = db.create_session(Some("Two")).unwrap();
+        let s3 = db.create_session(Some("Three")).unwrap();
+
+        // Add messages to verify cascade
+        db.save_message(&s1.id, "user", "hello", None).unwrap();
+        db.save_message(&s2.id, "user", "world", None).unwrap();
+
+        let ids = vec![s1.id.clone(), s2.id.clone()];
+        let deleted = db.delete_sessions(&ids).unwrap();
+        assert_eq!(deleted, 2);
+
+        // Deleted sessions are gone
+        assert!(db.get_session(&s1.id).is_err());
+        assert!(db.get_session(&s2.id).is_err());
+
+        // Survivor remains
+        assert_eq!(db.get_session(&s3.id).unwrap().name, "Three");
+
+        // Cascade: messages removed
+        assert!(db.get_messages(&s1.id).unwrap().is_empty());
+        assert!(db.get_messages(&s2.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_sessions_empty_list() {
+        let db = test_db();
+        db.create_session(Some("Survivor")).unwrap();
+        let deleted = db.delete_sessions(&[]).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(db.get_sessions().unwrap().len(), 1);
     }
 }
