@@ -42,15 +42,7 @@ Before finalizing any document, verify:
 When extracting information, categorize as:
 - **Decided**: User explicitly chose this → Include with confidence
 - **Implied**: Reasonable inference from context → Include but note assumption
-- **Unknown**: Not discussed → Mark [TBD] with recommendation to discuss
-
-<previously_generated_documents>
-{previously_generated_docs}
-</previously_generated_documents>
-
-<conversation>
-{conversation_history}
-</conversation>"##;
+- **Unknown**: Not discussed → Mark [TBD] with recommendation to discuss"##;
 
 pub const SPEC_PROMPT: &str = r##"Generate SPEC.md based on the planning conversation.
 

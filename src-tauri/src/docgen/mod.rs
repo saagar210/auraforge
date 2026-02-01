@@ -80,10 +80,12 @@ pub async fn generate_all_documents(
             .replace("{current_date}", &today)
             .replace("{previously_generated_docs}", &previously_generated);
 
+        let system_prompt = DOCGEN_SYSTEM_PROMPT.replace("{current_date}", &today);
+
         let llm_messages = vec![
             ChatMessage {
                 role: "system".to_string(),
-                content: DOCGEN_SYSTEM_PROMPT.to_string(),
+                content: system_prompt.clone(),
             },
             ChatMessage {
                 role: "user".to_string(),
@@ -106,7 +108,7 @@ pub async fn generate_all_documents(
             let retry_messages = vec![
                 ChatMessage {
                     role: "system".to_string(),
-                    content: DOCGEN_SYSTEM_PROMPT.to_string(),
+                    content: system_prompt.clone(),
                 },
                 ChatMessage {
                     role: "user".to_string(),
