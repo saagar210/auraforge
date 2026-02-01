@@ -16,8 +16,7 @@ tauri-build = { version = "2", features = [] }
 # Tauri core
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
-tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -41,13 +40,9 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
-anyhow = "1"
 dirs = "5"
 futures = "0.3"
 log = "0.4"
-
-# Async channels for streaming
-tokio-stream = "0.1"
 
 # Logging
 tauri-plugin-log = "2"

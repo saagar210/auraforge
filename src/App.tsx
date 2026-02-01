@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+  useLayoutEffect,
+} from "react";
 import { Sidebar } from "./components/Sidebar";
 import { ChatMessage, StreamingMessage } from "./components/ChatMessage";
 import { ChatInput } from "./components/ChatInput";
@@ -16,10 +23,16 @@ import { EmberParticles } from "./components/EmberParticles";
 import { ThermalBackground } from "./components/ThermalBackground";
 import { useChatStore } from "./stores/chatStore";
 import { friendlyError } from "./utils/errorMessages";
+import { resolveDefaultPath } from "./utils/paths";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, X, FileText, MessageSquare } from "lucide-react";
 
 function App() {
+  const INITIAL_MESSAGE_WINDOW = 120;
+  const MESSAGE_WINDOW_STEP = 80;
+  const SCROLL_TOP_THRESHOLD = 48;
+  const SCROLL_BOTTOM_THRESHOLD = 80;
+
   const {
     currentSessionId,
     messages,
@@ -34,17 +47,19 @@ function App() {
     documentsStale,
     showPreview,
     healthStatus,
-    wizardCompleted,
     isFirstSession,
     showSettings,
     showHelp,
+    config,
     checkHealth,
     loadPreferences,
+    loadConfig,
     setShowSettings,
     setShowHelp,
     loadSessions,
     createSession,
     sendMessage,
+    cancelResponse,
     clearStreamError,
     retryLastMessage,
     generateDocuments,
@@ -59,14 +74,19 @@ function App() {
   } = useChatStore();
 
   const [inputValue, setInputValue] = useState("");
+  const [visibleCount, setVisibleCount] = useState(INITIAL_MESSAGE_WINDOW);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const loadingOlderRef = useRef(false);
+  const prevScrollHeightRef = useRef<number | null>(null);
+  const isAtBottomRef = useRef(true);
 
   // Initialize on mount
   useEffect(() => {
     loadPreferences();
     checkHealth();
     loadSessions();
+    loadConfig();
     initEventListeners();
     return () => cleanupEventListeners();
   }, []);
@@ -74,20 +94,35 @@ function App() {
   // Show onboarding wizard if not completed
   const showOnboarding =
     healthStatus !== null &&
-    !wizardCompleted &&
-    (!healthStatus.ollama_connected || !healthStatus.ollama_model_available);
+    (!healthStatus.ollama_connected ||
+      !healthStatus.ollama_model_available ||
+      !healthStatus.database_ok ||
+      !healthStatus.config_valid);
 
   // Derived state
-  const userMessageCount = messages.filter((m) => m.role === "user").length;
-  const assistantMessageCount = messages.filter(
-    (m) => m.role === "assistant",
-  ).length;
-  const canForge =
-    userMessageCount >= 3 &&
-    assistantMessageCount >= 3 &&
-    !isStreaming &&
-    !isGenerating;
+  const { userMessageCount, assistantMessageCount } = useMemo(() => {
+    let users = 0;
+    let assistants = 0;
+    for (const msg of messages) {
+      if (msg.role === "user") users += 1;
+      if (msg.role === "assistant") assistants += 1;
+    }
+    return { userMessageCount: users, assistantMessageCount: assistants };
+  }, [messages]);
+  const canForge = useMemo(
+    () =>
+      userMessageCount >= 3 &&
+      assistantMessageCount >= 3 &&
+      !isStreaming &&
+      !isGenerating,
+    [assistantMessageCount, isGenerating, isStreaming, userMessageCount],
+  );
   const hasDocuments = documents.length > 0;
+  const hasOlderMessages = messages.length > visibleCount;
+  const visibleMessages = useMemo(() => {
+    if (messages.length <= visibleCount) return messages;
+    return messages.slice(messages.length - visibleCount);
+  }, [messages, visibleCount]);
 
   const handleSend = (content: string) => {
     // Mark first session complete on first message
@@ -107,15 +142,44 @@ function App() {
   };
 
   const handleSaveToFolder = useCallback(async () => {
+    const defaultPath = await resolveDefaultPath(
+      config?.output.default_save_path ?? "~/Projects",
+    );
     const selected = await open({
       directory: true,
       title: "Choose where to save your plan",
-      defaultPath: "~/Projects",
+      defaultPath,
     });
     if (selected) {
       await saveToFolder(selected);
     }
-  }, [saveToFolder]);
+  }, [config, saveToFolder]);
+
+  const loadOlderMessages = useCallback(() => {
+    if (!hasOlderMessages) return;
+    const el = chatContainerRef.current;
+    if (!el) return;
+    loadingOlderRef.current = true;
+    prevScrollHeightRef.current = el.scrollHeight;
+    setVisibleCount((count) =>
+      Math.min(messages.length, count + MESSAGE_WINDOW_STEP),
+    );
+  }, [hasOlderMessages, messages.length]);
+
+  const handleChatScroll = useCallback(() => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isAtBottomRef.current = distanceFromBottom < SCROLL_BOTTOM_THRESHOLD;
+
+    if (
+      el.scrollTop < SCROLL_TOP_THRESHOLD &&
+      hasOlderMessages &&
+      !loadingOlderRef.current
+    ) {
+      loadOlderMessages();
+    }
+  }, [hasOlderMessages, loadOlderMessages]);
 
   // Friendly error display
   const errorDisplay = streamError ? friendlyError(streamError) : null;
@@ -193,8 +257,27 @@ function App() {
 
   // Auto-scroll to bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingContent, isStreaming, isGenerating]);
+    if (loadingOlderRef.current || !isAtBottomRef.current) return;
+    const behavior = isStreaming ? "auto" : "smooth";
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  }, [visibleMessages, streamingContent, isStreaming, isGenerating]);
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_MESSAGE_WINDOW);
+  }, [currentSessionId]);
+
+  useLayoutEffect(() => {
+    if (!loadingOlderRef.current) return;
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const previousHeight = prevScrollHeightRef.current;
+    if (previousHeight != null) {
+      const newHeight = el.scrollHeight;
+      el.scrollTop = newHeight - previousHeight;
+    }
+    loadingOlderRef.current = false;
+    prevScrollHeightRef.current = null;
+  }, [visibleCount, messages.length]);
 
   return (
     <div className="h-full flex bg-void relative">
@@ -271,6 +354,7 @@ function App() {
                 <div
                   ref={chatContainerRef}
                   className="flex-1 overflow-y-auto px-6 py-6"
+                  onScroll={handleChatScroll}
                 >
                   <div className="flex flex-col gap-4 max-w-[720px] mx-auto">
                     {messagesLoading ? (
@@ -286,7 +370,15 @@ function App() {
                       />
                     ) : (
                       <>
-                        {messages.map((msg) => (
+                        {hasOlderMessages && (
+                          <button
+                            onClick={loadOlderMessages}
+                            className="mx-auto text-xs text-text-muted hover:text-text-primary border border-border-subtle rounded-full px-3 py-1 transition-colors"
+                          >
+                            Load earlier messages
+                          </button>
+                        )}
+                        {visibleMessages.map((msg) => (
                           <ChatMessage key={msg.id} message={msg} />
                         ))}
 
@@ -372,6 +464,8 @@ function App() {
                 <ChatInput
                   onSend={handleSend}
                   disabled={isStreaming || isGenerating}
+                  onCancel={cancelResponse}
+                  isStreaming={isStreaming}
                   value={inputValue}
                   onChange={setInputValue}
                 />

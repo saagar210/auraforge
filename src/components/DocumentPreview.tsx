@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Copy, Check, RefreshCw, FolderDown } from "lucide-react";
@@ -8,6 +9,150 @@ import { clsx } from "clsx";
 import type { GeneratedDocument } from "../types";
 
 const TAB_ORDER = ["README.md", "SPEC.md", "CLAUDE.md", "PROMPTS.md", "CONVERSATION.md"];
+
+const markdownComponents = {
+  a({ href, children }: { href?: string; children?: React.ReactNode }) {
+    const url = href ?? "";
+    const isSafe = /^(https?:|mailto:)/i.test(url);
+    return (
+      <a
+        href={url}
+        className="text-accent-glow hover:text-accent-gold underline"
+        rel="noreferrer"
+        onClick={(e) => {
+          if (!isSafe) {
+            e.preventDefault();
+            return;
+          }
+          e.preventDefault();
+          void openExternal(url);
+        }}
+      >
+        {children}
+      </a>
+    );
+  },
+  code({ className, children, ...props }: { className?: string; children?: React.ReactNode }) {
+    const match = /language-(\w+)/.exec(className || "");
+    const codeString = String(children).replace(/\n$/, "");
+
+    if (match) {
+      return (
+        <SyntaxHighlighter
+          style={oneDark}
+          language={match[1]}
+          PreTag="div"
+          customStyle={{
+            background: "#1A1517",
+            border: "1px solid #3a3335",
+            borderRadius: "8px",
+            fontSize: "13px",
+          }}
+        >
+          {codeString}
+        </SyntaxHighlighter>
+      );
+    }
+
+    return (
+      <code
+        className="bg-surface px-1.5 py-0.5 rounded text-accent-glow font-mono text-[13px]"
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  },
+  h1({ children }: { children?: React.ReactNode }) {
+    return (
+      <h1 className="font-heading text-2xl text-text-primary border-b border-border-subtle pb-3 mb-4 mt-6">
+        {children}
+      </h1>
+    );
+  },
+  h2({ children }: { children?: React.ReactNode }) {
+    return (
+      <h2 className="font-heading text-xl text-text-primary mt-6 mb-3">
+        {children}
+      </h2>
+    );
+  },
+  h3({ children }: { children?: React.ReactNode }) {
+    return (
+      <h3 className="font-heading text-lg text-text-primary mt-5 mb-2">
+        {children}
+      </h3>
+    );
+  },
+  p({ children }: { children?: React.ReactNode }) {
+    return <p className="text-text-primary leading-relaxed mb-4">{children}</p>;
+  },
+  ul({ children }: { children?: React.ReactNode }) {
+    return (
+      <ul className="text-text-primary mb-4 pl-6 list-disc space-y-1">
+        {children}
+      </ul>
+    );
+  },
+  ol({ children }: { children?: React.ReactNode }) {
+    return (
+      <ol className="text-text-primary mb-4 pl-6 list-decimal space-y-1">
+        {children}
+      </ol>
+    );
+  },
+  li({ children }: { children?: React.ReactNode }) {
+    return <li className="text-text-primary">{children}</li>;
+  },
+  table({ children }: { children?: React.ReactNode }) {
+    return (
+      <div className="overflow-x-auto mb-4">
+        <table className="w-full border-collapse border border-border-subtle text-sm">
+          {children}
+        </table>
+      </div>
+    );
+  },
+  th({ children }: { children?: React.ReactNode }) {
+    return (
+      <th className="border border-border-subtle bg-elevated px-3 py-2 text-left text-text-primary font-medium">
+        {children}
+      </th>
+    );
+  },
+  td({ children }: { children?: React.ReactNode }) {
+    return (
+      <td className="border border-border-subtle px-3 py-2 text-text-primary">
+        {children}
+      </td>
+    );
+  },
+  blockquote({ children }: { children?: React.ReactNode }) {
+    return (
+      <blockquote className="border-l-4 border-accent-gold/50 pl-4 my-4 text-text-secondary italic">
+        {children}
+      </blockquote>
+    );
+  },
+  hr() {
+    return <hr className="border-border-subtle my-6" />;
+  },
+  strong({ children }: { children?: React.ReactNode }) {
+    return <strong className="text-text-primary font-semibold">{children}</strong>;
+  },
+};
+
+const MarkdownContent = memo(function MarkdownContent({
+  content,
+}: {
+  content: string;
+}) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      {content}
+    </ReactMarkdown>
+  );
+});
 
 interface DocumentPreviewProps {
   documents: GeneratedDocument[];
@@ -133,141 +278,7 @@ export function DocumentPreview({
       <div className="flex-1 overflow-y-auto px-6 py-6 bg-void">
         <div className="max-w-[720px] mx-auto prose-auraforge">
           {activeDoc ? (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                code({ className, children, ...props }) {
-                  const match = /language-(\w+)/.exec(className || "");
-                  const codeString = String(children).replace(/\n$/, "");
-
-                  if (match) {
-                    return (
-                      <SyntaxHighlighter
-                        style={oneDark}
-                        language={match[1]}
-                        PreTag="div"
-                        customStyle={{
-                          background: "#1A1517",
-                          border: "1px solid #3a3335",
-                          borderRadius: "8px",
-                          fontSize: "13px",
-                        }}
-                      >
-                        {codeString}
-                      </SyntaxHighlighter>
-                    );
-                  }
-
-                  return (
-                    <code
-                      className="bg-surface px-1.5 py-0.5 rounded text-accent-glow font-mono text-[13px]"
-                      {...props}
-                    >
-                      {children}
-                    </code>
-                  );
-                },
-                h1({ children }) {
-                  return (
-                    <h1 className="font-heading text-2xl text-text-primary border-b border-border-subtle pb-3 mb-4 mt-6">
-                      {children}
-                    </h1>
-                  );
-                },
-                h2({ children }) {
-                  return (
-                    <h2 className="font-heading text-xl text-text-primary mt-6 mb-3">
-                      {children}
-                    </h2>
-                  );
-                },
-                h3({ children }) {
-                  return (
-                    <h3 className="font-heading text-lg text-text-primary mt-5 mb-2">
-                      {children}
-                    </h3>
-                  );
-                },
-                p({ children }) {
-                  return (
-                    <p className="text-text-primary leading-relaxed mb-4">
-                      {children}
-                    </p>
-                  );
-                },
-                ul({ children }) {
-                  return (
-                    <ul className="text-text-primary mb-4 pl-6 list-disc space-y-1">
-                      {children}
-                    </ul>
-                  );
-                },
-                ol({ children }) {
-                  return (
-                    <ol className="text-text-primary mb-4 pl-6 list-decimal space-y-1">
-                      {children}
-                    </ol>
-                  );
-                },
-                li({ children }) {
-                  return <li className="text-text-primary">{children}</li>;
-                },
-                table({ children }) {
-                  return (
-                    <div className="overflow-x-auto mb-4">
-                      <table className="w-full border-collapse border border-border-subtle text-sm">
-                        {children}
-                      </table>
-                    </div>
-                  );
-                },
-                th({ children }) {
-                  return (
-                    <th className="border border-border-subtle bg-elevated px-3 py-2 text-left text-text-primary font-medium">
-                      {children}
-                    </th>
-                  );
-                },
-                td({ children }) {
-                  return (
-                    <td className="border border-border-subtle px-3 py-2 text-text-primary">
-                      {children}
-                    </td>
-                  );
-                },
-                blockquote({ children }) {
-                  return (
-                    <blockquote className="border-l-4 border-accent-gold/50 pl-4 my-4 text-text-secondary italic">
-                      {children}
-                    </blockquote>
-                  );
-                },
-                hr() {
-                  return <hr className="border-border-subtle my-6" />;
-                },
-                a({ href, children }) {
-                  return (
-                    <a
-                      href={href}
-                      className="text-accent-glow hover:text-accent-gold underline"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      {children}
-                    </a>
-                  );
-                },
-                strong({ children }) {
-                  return (
-                    <strong className="text-text-primary font-semibold">
-                      {children}
-                    </strong>
-                  );
-                },
-              }}
-            >
-              {activeDoc.content}
-            </ReactMarkdown>
+            <MarkdownContent content={activeDoc.content} />
           ) : (
             <p className="text-text-muted text-center py-8">
               Select a document tab to view

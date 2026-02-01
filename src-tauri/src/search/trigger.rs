@@ -24,6 +24,8 @@ const TECH_KEYWORDS: &[&str] = &[
     "mongodb",
     "redis",
     "sqlite",
+    "database",
+    "db",
     "docker",
     "kubernetes",
     "k8s",
@@ -50,11 +52,21 @@ const TRIGGER_PATTERNS: &[&str] = &[
     "best practice",
     "best way to",
     "how to implement",
+    "how to structure",
+    "folder structure",
+    "is * maintained",
+    "is * deprecated",
+    "does * work with",
+    "compatible with",
     "latest version",
+    "current version",
+    "in 2025",
+    "in 2026",
     "what is the difference",
     "compare ",
     "comparison",
     "recommend",
+    "recommended",
     "alternative to",
     "pros and cons",
     "trade-off",
@@ -65,21 +77,25 @@ const TRIGGER_PATTERNS: &[&str] = &[
 pub fn should_search(message: &str) -> Option<String> {
     let lower = message.to_lowercase();
 
-    // Check for trigger patterns first
-    let has_trigger = TRIGGER_PATTERNS.iter().any(|p| lower.contains(p));
-
-    if !has_trigger {
-        return None;
+    for pattern in TRIGGER_PATTERNS {
+        if pattern.contains('*') {
+            let parts: Vec<&str> = pattern.split('*').collect();
+            if parts.len() == 2 {
+                if let Some(start) = lower.find(parts[0]) {
+                    if lower[start..].contains(parts[1]) {
+                        return Some(build_search_query(message));
+                    }
+                }
+            }
+        } else if lower.contains(pattern) {
+            let has_tech = TECH_KEYWORDS.iter().any(|k| lower.contains(k));
+            if has_tech {
+                return Some(build_search_query(message));
+            }
+        }
     }
 
-    // Must also mention at least one tech keyword
-    let has_tech = TECH_KEYWORDS.iter().any(|k| lower.contains(k));
-
-    if !has_tech {
-        return None;
-    }
-
-    Some(build_search_query(message))
+    None
 }
 
 fn build_search_query(message: &str) -> String {
@@ -167,6 +183,24 @@ mod tests {
     }
 
     #[test]
+    fn triggers_on_maintenance_wildcard() {
+        let result = should_search("Is moment.js still maintained?");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn triggers_on_compatibility_wildcard() {
+        let result = should_search("Does React work with Electron?");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn triggers_on_year_freshness() {
+        let result = should_search("Best practices for Docker in 2026");
+        assert!(result.is_some());
+    }
+
+    #[test]
     fn no_trigger_without_tech_keyword() {
         let result = should_search("What are best practices for cooking pasta?");
         assert!(result.is_none());
@@ -246,6 +280,10 @@ mod tests {
             "latest version of Next.js",
             "pros and cons of MongoDB",
             "which is better React or Angular",
+            "is lodash deprecated",
+            "does prisma work with sqlite",
+            "folder structure for React",
+            "recommended database in 2026",
         ];
         for p in patterns {
             assert!(should_search(p).is_some(), "Failed for: {}", p);

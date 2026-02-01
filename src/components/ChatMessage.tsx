@@ -1,11 +1,40 @@
+import { memo, type ReactNode } from "react";
 import { clsx } from "clsx";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
 import type { Message } from "../types";
 
 interface ChatMessageProps {
   message: Message;
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+const markdownComponents = {
+  a({ href, children }: { href?: string; children?: ReactNode }) {
+    const url = href ?? "";
+    const isSafe = /^(https?:|mailto:)/i.test(url);
+    return (
+      <a
+        href={url}
+        className="text-accent-glow underline underline-offset-2"
+        rel="noreferrer"
+        onClick={(e) => {
+          if (!isSafe) {
+            e.preventDefault();
+            return;
+          }
+          e.preventDefault();
+          void openExternal(url);
+        }}
+      >
+        {children}
+      </a>
+    );
+  },
+};
+
+export const ChatMessage = memo(
+  function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === "user";
 
   return (
@@ -34,11 +63,27 @@ export function ChatMessage({ message }: ChatMessageProps) {
         />
       )}
       <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap break-words">
-        {message.content}
+        {isUser ? (
+          message.content
+        ) : (
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={markdownComponents}
+          >
+            {message.content}
+          </ReactMarkdown>
+        )}
       </div>
     </div>
   );
-}
+  },
+  (prev, next) =>
+    prev.message.id === next.message.id &&
+    prev.message.content === next.message.content &&
+    prev.message.role === next.message.role &&
+    prev.message.created_at === next.message.created_at &&
+    prev.message.metadata === next.message.metadata,
+);
 
 interface StreamingMessageProps {
   content: string;

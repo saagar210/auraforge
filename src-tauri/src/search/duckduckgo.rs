@@ -1,14 +1,11 @@
-use reqwest::Client;
 use scraper::{Html, Selector};
 
 use super::{SearchError, SearchResult};
 
-pub async fn search(query: &str) -> Result<Vec<SearchResult>, SearchError> {
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| SearchError::NetworkError(e.to_string()))?;
-
+pub async fn search(
+    client: &reqwest::Client,
+    query: &str,
+) -> Result<Vec<SearchResult>, SearchError> {
     let response = client
         .post("https://html.duckduckgo.com/html/")
         .header("Content-Type", "application/x-www-form-urlencoded")

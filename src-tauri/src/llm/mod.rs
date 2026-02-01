@@ -5,7 +5,9 @@ use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
+use tokio::time::{timeout, Duration};
 
+use crate::error::AppError;
 use crate::search::SearchResult;
 use crate::types::AppConfig;
 
@@ -66,6 +68,7 @@ pub struct StreamChunk {
     pub error: Option<String>,
     pub search_query: Option<String>,
     pub search_results: Option<Vec<SearchResult>>,
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -96,29 +99,39 @@ pub struct OllamaClient {
 
 impl OllamaClient {
     pub fn new() -> Self {
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| Client::new());
         Self {
-            client: Client::new(),
+            client,
             pull_cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    pub async fn list_models(&self, base_url: &str) -> Result<Vec<String>, String> {
+    pub async fn list_models(&self, base_url: &str) -> Result<Vec<String>, AppError> {
         let resp = self
             .client
             .get(format!("{}/api/tags", base_url))
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .await
-            .map_err(|e| format!("Failed to connect to Ollama: {}", e))?;
+            .map_err(|e| AppError::OllamaConnection {
+                url: base_url.to_string(),
+                message: e.to_string(),
+            })?;
 
         if !resp.status().is_success() {
-            return Err(format!("Ollama returned {}", resp.status()));
+            return Err(AppError::LlmRequest(format!(
+                "Ollama returned {}",
+                resp.status()
+            )));
         }
 
         let tags: OllamaTagsResponse = resp
             .json()
             .await
-            .map_err(|e| format!("Failed to parse Ollama response: {}", e))?;
+            .map_err(|e| AppError::LlmRequest(format!("Failed to parse Ollama response: {}", e)))?;
 
         Ok(tags.models.into_iter().map(|m| m.name).collect())
     }
@@ -128,7 +141,7 @@ impl OllamaClient {
         app: &tauri::AppHandle,
         base_url: &str,
         model_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), AppError> {
         self.pull_cancelled.store(false, Ordering::SeqCst);
 
         let response = self
@@ -138,20 +151,35 @@ impl OllamaClient {
                 name: model_name.to_string(),
                 stream: true,
             })
+            .timeout(Duration::from_secs(300))
             .send()
             .await
-            .map_err(|e| format!("Failed to connect to Ollama: {}", e))?;
+            .map_err(|e| AppError::OllamaConnection {
+                url: base_url.to_string(),
+                message: e.to_string(),
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(format!("Ollama returned {}: {}", status, body));
+            if status == reqwest::StatusCode::NOT_FOUND {
+                return Err(AppError::ModelNotFound {
+                    model: model_name.to_string(),
+                });
+            }
+            return Err(AppError::LlmRequest(format!(
+                "Ollama returned {}: {}",
+                status, body
+            )));
         }
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
 
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = timeout(Duration::from_secs(120), stream.next())
+            .await
+            .map_err(|_| AppError::StreamInterrupted)?
+        {
             if self.pull_cancelled.load(Ordering::SeqCst) {
                 let _ = app.emit(
                     "model:pull_progress",
@@ -161,10 +189,10 @@ impl OllamaClient {
                         completed: None,
                     },
                 );
-                return Err("Pull cancelled".to_string());
+                return Err(AppError::StreamCancelled);
             }
 
-            let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
+            let chunk = chunk.map_err(|_| AppError::StreamInterrupted)?;
             buffer.push_str(&String::from_utf8_lossy(&chunk));
 
             while let Some(newline_pos) = buffer.find('\n') {
@@ -186,7 +214,7 @@ impl OllamaClient {
                                     completed: None,
                                 },
                             );
-                            return Err(err.clone());
+                            return Err(AppError::LlmRequest(err.clone()));
                         }
 
                         let status = parsed.status.unwrap_or_default();
@@ -215,27 +243,31 @@ impl OllamaClient {
         self.pull_cancelled.store(true, Ordering::SeqCst);
     }
 
-    pub async fn check_connection(&self, base_url: &str) -> Result<bool, String> {
-        match self
-            .client
-            .get(format!("{}/api/tags", base_url))
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await
-        {
-            Ok(resp) => Ok(resp.status().is_success()),
-            Err(_) => Ok(false),
-        }
-    }
-
-    pub async fn check_model(&self, base_url: &str, model: &str) -> Result<bool, String> {
+    pub async fn check_connection(&self, base_url: &str) -> Result<bool, AppError> {
         let resp = self
             .client
             .get(format!("{}/api/tags", base_url))
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .await
-            .map_err(|e| format!("Failed to connect to Ollama: {}", e))?;
+            .map_err(|e| AppError::OllamaConnection {
+                url: base_url.to_string(),
+                message: e.to_string(),
+            })?;
+        Ok(resp.status().is_success())
+    }
+
+    pub async fn check_model(&self, base_url: &str, model: &str) -> Result<bool, AppError> {
+        let resp = self
+            .client
+            .get(format!("{}/api/tags", base_url))
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+            .map_err(|e| AppError::OllamaConnection {
+                url: base_url.to_string(),
+                message: e.to_string(),
+            })?;
 
         if !resp.status().is_success() {
             return Ok(false);
@@ -244,7 +276,7 @@ impl OllamaClient {
         let tags: OllamaTagsResponse = resp
             .json()
             .await
-            .map_err(|e| format!("Failed to parse Ollama response: {}", e))?;
+            .map_err(|e| AppError::LlmRequest(format!("Failed to parse Ollama response: {}", e)))?;
 
         Ok(tags.models.iter().any(|m| {
             m.name == model
@@ -270,6 +302,7 @@ impl OllamaClient {
         (connected, model_available)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn stream_chat(
         &self,
         app: &tauri::AppHandle,
@@ -277,7 +310,9 @@ impl OllamaClient {
         model: &str,
         messages: Vec<ChatMessage>,
         temperature: f64,
-    ) -> Result<String, String> {
+        session_id: &str,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<String, AppError> {
         let url = format!("{}/api/chat", base_url);
 
         let response = self
@@ -292,20 +327,48 @@ impl OllamaClient {
             .timeout(std::time::Duration::from_secs(300))
             .send()
             .await
-            .map_err(|e| format!("Failed to connect to Ollama: {}", e))?;
+            .map_err(|e| AppError::OllamaConnection {
+                url: base_url.to_string(),
+                message: e.to_string(),
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(format!("Ollama returned {}: {}", status, body));
+            if status == reqwest::StatusCode::NOT_FOUND {
+                return Err(AppError::ModelNotFound {
+                    model: model.to_string(),
+                });
+            }
+            return Err(AppError::LlmRequest(format!(
+                "Ollama returned {}: {}",
+                status, body
+            )));
         }
 
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
         let mut buffer = String::new();
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
+        let mut done = false;
+        while let Some(chunk) = timeout(Duration::from_secs(60), stream.next())
+            .await
+            .map_err(|_| AppError::StreamInterrupted)?
+        {
+            if let Some(flag) = &cancel {
+                if flag.load(Ordering::SeqCst) {
+                    let _ = app.emit(
+                        "stream:done",
+                        StreamChunk {
+                            r#type: "done".to_string(),
+                            session_id: Some(session_id.to_string()),
+                            ..Default::default()
+                        },
+                    );
+                    return Err(AppError::StreamCancelled);
+                }
+            }
+            let chunk = chunk.map_err(|_| AppError::StreamInterrupted)?;
             buffer.push_str(&String::from_utf8_lossy(&chunk));
 
             // Process complete lines from the buffer
@@ -327,17 +390,31 @@ impl OllamaClient {
                                 StreamChunk {
                                     r#type: "content".to_string(),
                                     content: Some(parsed.message.content),
+                                    session_id: Some(session_id.to_string()),
                                     ..Default::default()
                                 },
                             );
                         }
 
                         if parsed.done {
-                            let _ = app.emit("stream:done", ());
+                            let _ = app.emit(
+                                "stream:done",
+                                StreamChunk {
+                                    r#type: "done".to_string(),
+                                    session_id: Some(session_id.to_string()),
+                                    ..Default::default()
+                                },
+                            );
+                            done = true;
+                            break;
                         }
                     }
                     Err(_) => continue,
                 }
+            }
+
+            if done {
+                break;
             }
         }
 
@@ -352,6 +429,7 @@ impl OllamaClient {
                         StreamChunk {
                             r#type: "content".to_string(),
                             content: Some(parsed.message.content),
+                            session_id: Some(session_id.to_string()),
                             ..Default::default()
                         },
                     );
@@ -369,7 +447,7 @@ impl OllamaClient {
         model: &str,
         messages: Vec<ChatMessage>,
         temperature: f64,
-    ) -> Result<String, String> {
+    ) -> Result<String, AppError> {
         let url = format!("{}/api/chat", base_url);
 
         let response = self
@@ -384,18 +462,29 @@ impl OllamaClient {
             .timeout(std::time::Duration::from_secs(300))
             .send()
             .await
-            .map_err(|e| format!("Failed to connect to Ollama: {}", e))?;
+            .map_err(|e| AppError::OllamaConnection {
+                url: base_url.to_string(),
+                message: e.to_string(),
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(format!("Ollama returned {}: {}", status, body));
+            if status == reqwest::StatusCode::NOT_FOUND {
+                return Err(AppError::ModelNotFound {
+                    model: model.to_string(),
+                });
+            }
+            return Err(AppError::LlmRequest(format!(
+                "Ollama returned {}: {}",
+                status, body
+            )));
         }
 
         let body: OllamaChatResponse = response
             .json()
             .await
-            .map_err(|e| format!("Failed to parse Ollama response: {}", e))?;
+            .map_err(|e| AppError::LlmRequest(format!("Failed to parse Ollama response: {}", e)))?;
 
         Ok(body.message.content)
     }

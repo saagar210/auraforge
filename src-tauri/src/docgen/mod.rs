@@ -2,6 +2,7 @@ mod prompts;
 
 use tauri::Emitter;
 
+use crate::error::AppError;
 use crate::llm::ChatMessage;
 use crate::state::AppState;
 use crate::types::{GenerateProgress, GeneratedDocument, Message, Session};
@@ -12,27 +13,25 @@ pub async fn generate_all_documents(
     app: &tauri::AppHandle,
     state: &AppState,
     session_id: &str,
-) -> Result<Vec<GeneratedDocument>, String> {
+) -> Result<Vec<GeneratedDocument>, AppError> {
     let messages = state
         .db
         .get_messages(session_id)
-        .map_err(|e| format!("Failed to load messages: {}", e))?;
+        .map_err(AppError::from)?;
 
     let session = state
         .db
         .get_session(session_id)
-        .map_err(|e| format!("Failed to load session: {}", e))?;
+        .map_err(AppError::from)?;
 
     let conversation = format_conversation_for_prompt(&messages);
-    let config = state.config.lock().unwrap().clone();
+    let config = state
+        .config
+        .lock()
+        .map_err(|_| AppError::Config("Config lock poisoned".to_string()))?
+        .clone();
 
-    // Delete any existing documents for this session
-    state
-        .db
-        .delete_documents(session_id)
-        .map_err(|e| format!("Failed to clear old documents: {}", e))?;
-
-    let mut documents = Vec::new();
+    let mut drafts: Vec<(String, String)> = Vec::new();
     let include_conversation = config.output.include_conversation;
 
     // Order: SPEC → CLAUDE → PROMPTS → README (cross-referencing order)
@@ -101,12 +100,7 @@ pub async fn generate_all_documents(
                 .await?;
         }
 
-        let doc = state
-            .db
-            .save_document(session_id, filename, &content)
-            .map_err(|e| format!("Failed to save {}: {}", filename, e))?;
-
-        documents.push(doc);
+        drafts.push((filename.to_string(), content));
     }
 
     // CONVERSATION.md — generated from data, not LLM (optional)
@@ -121,12 +115,13 @@ pub async fn generate_all_documents(
         );
 
         let conversation_md = generate_conversation_md(&session, &messages);
-        let doc = state
-            .db
-            .save_document(session_id, "CONVERSATION.md", &conversation_md)
-            .map_err(|e| format!("Failed to save CONVERSATION.md: {}", e))?;
-        documents.push(doc);
+        drafts.push(("CONVERSATION.md".to_string(), conversation_md));
     }
+
+    let documents = state
+        .db
+        .replace_documents(session_id, &drafts)
+        .map_err(AppError::from)?;
 
     let _ = app.emit("generate:complete", documents.len());
 

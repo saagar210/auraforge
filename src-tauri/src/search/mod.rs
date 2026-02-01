@@ -1,13 +1,27 @@
 mod duckduckgo;
+mod searxng;
 mod tavily;
 mod trigger;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use reqwest::Client;
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use crate::types::SearchConfig;
 
 pub use trigger::should_search;
+
+fn search_client() -> &'static Client {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| Client::new())
+    })
+}
 
 #[derive(Debug, Error)]
 pub enum SearchError {
@@ -35,8 +49,12 @@ pub async fn execute_search(
     config: &SearchConfig,
     query: &str,
 ) -> Result<Vec<SearchResult>, SearchError> {
+    if !config.enabled || config.provider == "none" {
+        return Ok(vec![]);
+    }
+    let client = search_client();
     match config.provider.as_str() {
-        "tavily" => match tavily::search(&config.tavily_api_key, query).await {
+        "tavily" => match tavily::search(client, &config.tavily_api_key, query).await {
             Ok(results) => Ok(results),
             Err(
                 SearchError::InvalidApiKey
@@ -48,11 +66,12 @@ pub async fn execute_search(
                     "Tavily search failed, falling back to DuckDuckGo: {}",
                     query
                 );
-                duckduckgo::search(query).await
+                duckduckgo::search(client, query).await
             }
             Err(e) => Err(e),
         },
-        "duckduckgo" => duckduckgo::search(query).await,
-        _ => duckduckgo::search(query).await,
+        "duckduckgo" => duckduckgo::search(client, query).await,
+        "searxng" => searxng::search(client, &config.searxng_url, query).await,
+        _ => Ok(vec![]),
     }
 }

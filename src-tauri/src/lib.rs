@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod db;
 mod docgen;
+mod error;
 mod llm;
 mod search;
 mod state;
@@ -18,16 +19,29 @@ use tauri::Emitter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let config = load_or_create_config().expect("Failed to load configuration");
+    let (config, config_error) = load_or_create_config();
 
     let db_file = db_path();
+    let mut db_error = None;
     let db = match Database::new(&db_file) {
         Ok(db) => db,
         Err(e) => {
             log::warn!("Database corrupted ({}), recreating", e);
             let backup = db_file.with_extension("db.bak");
             let _ = std::fs::rename(&db_file, &backup);
-            Database::new(&db_file).expect("Failed to create fresh database")
+            match Database::new(&db_file) {
+                Ok(db) => db,
+                Err(e) => {
+                    db_error = Some(format!("Failed to open database: {}", e));
+                    match Database::new_in_memory() {
+                        Ok(db) => db,
+                        Err(err) => {
+                            log::error!("Failed to create fallback DB: {}", err);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
         }
     };
 
@@ -37,12 +51,14 @@ pub fn run() {
         db,
         ollama,
         config: Mutex::new(config),
+        config_error: Mutex::new(config_error),
+        db_error: Mutex::new(db_error),
+        stream_cancel: Mutex::new(std::collections::HashMap::new()),
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -161,6 +177,7 @@ pub fn run() {
             commands::delete_session,
             commands::get_messages,
             commands::send_message,
+            commands::cancel_response,
             commands::get_config,
             commands::update_search_config,
             commands::update_config,
@@ -168,8 +185,10 @@ pub fn run() {
             commands::get_documents,
             commands::check_documents_stale,
             commands::save_to_folder,
-            commands::open_folder,
+            commands::web_search,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| {
+            log::error!("error while running tauri application: {}", e);
+        });
 }

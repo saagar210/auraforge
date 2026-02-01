@@ -1,3 +1,62 @@
+export function normalizeError(error: unknown): string {
+  if (typeof error === "string") return error;
+
+  if (error && typeof error === "object") {
+    const maybeError = error as Record<string, unknown>;
+
+    const direct = extractMessage(maybeError);
+    if (direct) return direct;
+
+    if (maybeError.error && typeof maybeError.error === "object") {
+      const nested = extractMessage(maybeError.error as Record<string, unknown>);
+      if (nested) return nested;
+    }
+
+    if (typeof maybeError.message === "string") {
+      const parsed = tryParseErrorResponse(maybeError.message);
+      if (parsed) return parsed;
+      return maybeError.message;
+    }
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function extractMessage(error: Record<string, unknown>): string | null {
+  if (typeof error.message === "string") {
+    const parsed = tryParseErrorResponse(error.message);
+    if (parsed) return parsed;
+    return error.message;
+  }
+  if (typeof error.code === "string" && typeof error.message === "string") {
+    return error.message;
+  }
+  if (typeof error.code === "string" && typeof error.message !== "string") {
+    return String(error.code);
+  }
+  return null;
+}
+
+function tryParseErrorResponse(raw: string): string | null {
+  if (!raw.trim().startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(raw) as { message?: unknown; action?: unknown };
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.message === "string") {
+      return parsed.action
+        ? `${parsed.message} (${String(parsed.action)})`
+        : parsed.message;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export function friendlyError(error: string): {
   message: string;
   suggestion: string;
@@ -43,6 +102,13 @@ export function friendlyError(error: string): {
     return {
       message: "The AI response was interrupted",
       suggestion: "Click Retry to try again.",
+    };
+  }
+
+  if (lower.includes("stream") && lower.includes("cancel")) {
+    return {
+      message: "Response cancelled",
+      suggestion: "You can send a new message anytime.",
     };
   }
 

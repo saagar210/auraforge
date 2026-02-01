@@ -21,6 +21,18 @@ pub struct Message {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateSessionRequest {
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendMessageRequest {
+    pub session_id: String,
+    pub content: String,
+    pub retry: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthStatus {
     pub ollama_connected: bool,
     pub ollama_model_available: bool,
@@ -73,6 +85,17 @@ pub struct GeneratedDocument {
     pub filename: String,
     pub content: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerateDocumentsRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveToFolderRequest {
+    pub session_id: String,
+    pub folder_path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { openPath as openFolder } from "@tauri-apps/plugin-opener";
 import type {
   Session,
   Message,
@@ -14,6 +16,8 @@ import type {
   ModelPullProgress,
   OnboardingStep,
 } from "../types";
+import { normalizeError } from "../utils/errorMessages";
+import { resolveDefaultPath } from "../utils/paths";
 
 interface ChatState {
   // Sessions
@@ -57,6 +61,9 @@ interface ChatState {
   showHelp: boolean;
   sidebarCollapsed: boolean;
 
+  // Config
+  config: AppConfig | null;
+
   // Loading
   sessionsLoading: boolean;
   messagesLoading: boolean;
@@ -71,6 +78,7 @@ interface ChatState {
   deleteSession: (sessionId: string) => Promise<void>;
   renameSession: (sessionId: string, name: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
+  cancelResponse: () => Promise<void>;
   clearStreamError: () => void;
 
   // Wizard actions
@@ -87,12 +95,7 @@ interface ChatState {
   // Config actions
   loadConfig: () => Promise<AppConfig | null>;
   updateSearchConfig: (config: SearchConfig) => Promise<void>;
-  updateConfig: (updates: {
-    llm?: import("../types").LLMConfig;
-    search?: SearchConfig;
-    ui?: import("../types").UIConfig;
-    output?: import("../types").OutputConfig;
-  }) => Promise<AppConfig | null>;
+  updateConfig: (config: AppConfig) => Promise<AppConfig | null>;
 
   // Document actions
   generateDocuments: () => Promise<void>;
@@ -114,7 +117,31 @@ interface ChatState {
   cleanupEventListeners: () => void;
 }
 
-export const useChatStore = create<ChatState>((set, get) => ({
+export const useChatStore = create<ChatState>((set, get) => {
+  let streamBuffer = "";
+  let streamRafId: number | null = null;
+
+  const flushStreamBuffer = () => {
+    if (!streamBuffer) return;
+    set((state) => ({
+      streamingContent: state.streamingContent + streamBuffer,
+    }));
+    streamBuffer = "";
+  };
+
+  const scheduleStreamFlush = () => {
+    if (streamRafId !== null) return;
+    if (typeof requestAnimationFrame === "function") {
+      streamRafId = requestAnimationFrame(() => {
+        streamRafId = null;
+        flushStreamBuffer();
+      });
+    } else {
+      flushStreamBuffer();
+    }
+  };
+
+  return ({
   sessions: [],
   currentSessionId: null,
   messages: [],
@@ -140,6 +167,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   showSettings: false,
   showHelp: false,
   sidebarCollapsed: false,
+  config: null,
   sessionsLoading: false,
   messagesLoading: false,
   _unlisteners: [],
@@ -176,15 +204,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       await invoke<Message>("send_message", {
-        sessionId: currentSessionId,
-        content: lastUserMsg.content,
-        retry: true,
+        request: {
+          session_id: currentSessionId,
+          content: lastUserMsg.content,
+          retry: true,
+        },
       });
 
       if (get().currentSessionId !== currentSessionId) return;
 
       const allMessages = await invoke<Message[]>("get_messages", {
-        sessionId: currentSessionId,
+        session_id: currentSessionId,
       });
 
       if (get().currentSessionId !== currentSessionId) return;
@@ -200,7 +230,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (get().currentSessionId === currentSessionId) {
         set({
           isStreaming: false,
-          streamError: String(e),
+          streamError: normalizeError(e),
           searchQuery: null,
           searchResults: null,
         });
@@ -221,7 +251,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   createSession: async () => {
     try {
-      const session = await invoke<Session>("create_session", { name: null });
+      const session = await invoke<Session>("create_session", {
+        request: { name: null },
+      });
       set((state) => ({
         sessions: [session, ...state.sessions],
         currentSessionId: session.id,
@@ -258,7 +290,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     try {
       const messages = await invoke<Message[]>("get_messages", {
-        sessionId,
+        session_id: sessionId,
       });
       set({ messages, messagesLoading: false });
 
@@ -272,7 +304,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   deleteSession: async (sessionId: string) => {
     try {
-      await invoke("delete_session", { sessionId });
+      await invoke("delete_session", { session_id: sessionId });
       set((state) => {
         const sessions = state.sessions.filter((s) => s.id !== sessionId);
         const newCurrentId =
@@ -301,7 +333,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   renameSession: async (sessionId: string, name: string) => {
     try {
       const updated = await invoke<Session>("update_session", {
-        sessionId,
+        session_id: sessionId,
         name,
         status: null,
       });
@@ -330,8 +362,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const userMsg = await invoke<Message>("send_message", {
-        sessionId,
-        content,
+        request: { session_id: sessionId, content },
       });
 
       // Guard: if user switched sessions during the await, discard result
@@ -343,7 +374,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
 
       const allMessages = await invoke<Message[]>("get_messages", {
-        sessionId,
+        session_id: sessionId,
       });
 
       // Guard again after second await
@@ -368,11 +399,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (get().currentSessionId === sessionId) {
         set({
           isStreaming: false,
-          streamError: String(e),
+          streamError: normalizeError(e),
           searchQuery: null,
           searchResults: null,
         });
       }
+    }
+  },
+
+  cancelResponse: async () => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return;
+    try {
+      await invoke("cancel_response", { session_id: sessionId });
+    } catch (e) {
+      console.error("Failed to cancel response:", e);
     }
   },
 
@@ -424,7 +465,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pullModel: async (name: string) => {
     set({ isModelPulling: true, modelPullProgress: null });
     try {
-      await invoke("pull_model", { modelName: name });
+      await invoke("pull_model", { model_name: name });
     } catch (e) {
       console.error("Model pull failed:", e);
       set({ isModelPulling: false });
@@ -459,7 +500,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   loadConfig: async () => {
     try {
-      return await invoke<AppConfig>("get_config");
+      const config = await invoke<AppConfig>("get_config");
+      set({ config });
+      return config;
     } catch (e) {
       console.error("Failed to load config:", e);
       return null;
@@ -468,15 +511,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   updateSearchConfig: async (searchConfig: SearchConfig) => {
     try {
-      await invoke("update_search_config", { searchConfig });
+      await invoke("update_search_config", { search_config: searchConfig });
+      set((state) =>
+        state.config
+          ? { config: { ...state.config, search: searchConfig } }
+          : state,
+      );
     } catch (e) {
       console.error("Failed to update search config:", e);
     }
   },
 
-  updateConfig: async (updates) => {
+  updateConfig: async (config) => {
     try {
-      return await invoke<AppConfig>("update_config", updates);
+      const updated = await invoke<AppConfig>("update_config", { config });
+      set({ config: updated });
+      return updated;
     } catch (e) {
       console.error("Failed to update config:", e);
       return null;
@@ -492,10 +542,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, generateProgress: null });
 
     try {
-      const documents = await invoke<GeneratedDocument[]>(
-        "generate_documents",
-        { sessionId },
-      );
+      const documents = await invoke<GeneratedDocument[]>("generate_documents", {
+        request: { session_id: sessionId },
+      });
       set({
         documents,
         isGenerating: false,
@@ -508,7 +557,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({
         isGenerating: false,
         generateProgress: null,
-        streamError: `Document generation failed: ${String(e)}`,
+        streamError: `Document generation failed: ${normalizeError(e)}`,
       });
     }
   },
@@ -519,7 +568,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const documents = await invoke<GeneratedDocument[]>("get_documents", {
-        sessionId,
+        session_id: sessionId,
       });
       if (documents.length > 0) {
         set({ documents });
@@ -537,7 +586,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const stale = await invoke<boolean>("check_documents_stale", {
-        sessionId,
+        session_id: sessionId,
       });
       set({ documentsStale: stale });
     } catch (e) {
@@ -555,8 +604,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const savedPath = await invoke<string>("save_to_folder", {
-        sessionId,
-        folderPath,
+        request: { session_id: sessionId, folder_path: folderPath },
       });
       set({
         toast: {
@@ -569,7 +617,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (e) {
       set({
         toast: {
-          message: String(e),
+          message: normalizeError(e),
           type: "error",
         },
       });
@@ -579,7 +627,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   openFolder: async (path: string) => {
     try {
-      await invoke("open_folder", { path });
+      await openFolder(path);
     } catch (e) {
       console.error("Failed to open folder:", e);
     }
@@ -593,21 +641,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const unlisteners: UnlistenFn[] = [];
 
     const unlChunk = await listen<StreamChunk>("stream:chunk", (event) => {
-      const { type, content, search_query, search_results } = event.payload;
+      const { type, content, session_id } = event.payload;
+      const current = get().currentSessionId;
+      if (session_id && current && session_id !== current) return;
 
       if (type === "content" && content) {
-        set((state) => ({
-          streamingContent: state.streamingContent + content,
-        }));
-      } else if (type === "search_start" && search_query) {
+        streamBuffer += content;
+        scheduleStreamFlush();
+      }
+    });
+    unlisteners.push(unlChunk);
+
+    const unlSearch = await listen<StreamChunk>("stream:search", (event) => {
+      const { type, search_query, search_results, session_id } = event.payload;
+      const current = get().currentSessionId;
+      if (session_id && current && session_id !== current) return;
+
+      if (type === "search_start" && search_query) {
         set({ searchQuery: search_query });
       } else if (type === "search_result" && search_results) {
         set({ searchResults: search_results });
       }
     });
-    unlisteners.push(unlChunk);
+    unlisteners.push(unlSearch);
 
     const unlError = await listen<StreamChunk>("stream:error", (event) => {
+      const { session_id } = event.payload;
+      const current = get().currentSessionId;
+      if (session_id && current && session_id !== current) return;
+      flushStreamBuffer();
       set({
         isStreaming: false,
         streamError: event.payload.error ?? "Unknown streaming error",
@@ -616,6 +678,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     });
     unlisteners.push(unlError);
+
+    const unlDone = await listen<StreamChunk>("stream:done", (event) => {
+      const { session_id } = event.payload;
+      const current = get().currentSessionId;
+      if (session_id && current && session_id !== current) return;
+      flushStreamBuffer();
+      set({
+        isStreaming: false,
+        searchQuery: null,
+        searchResults: null,
+      });
+    });
+    unlisteners.push(unlDone);
 
     const unlProgress = await listen<GenerateProgress>(
       "generate:progress",
@@ -654,6 +729,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
         case "new_session":
           store.createSession();
           break;
+        case "save_to_folder": {
+          const sessionId = store.currentSessionId;
+          if (!sessionId) break;
+          void (async () => {
+            const defaultPath = await resolveDefaultPath(
+              store.config?.output.default_save_path ?? "~/Projects",
+            );
+            const selected = await openDialog({
+              directory: true,
+              title: "Choose where to save your plan",
+              defaultPath,
+            });
+            if (typeof selected === "string") {
+              store.saveToFolder(selected);
+            }
+          })();
+          break;
+        }
+        case "rename_session": {
+          const sessionId = store.currentSessionId;
+          const session = store.sessions.find((s) => s.id === sessionId);
+          if (!sessionId || !session) break;
+          const name = window.prompt("Rename session", session.name);
+          if (name && name.trim().length > 0) {
+            store.renameSession(sessionId, name.trim());
+          }
+          break;
+        }
+        case "delete_session": {
+          const sessionId = store.currentSessionId;
+          const session = store.sessions.find((s) => s.id === sessionId);
+          if (!sessionId || !session) break;
+          const confirmed = window.confirm(
+            `Delete "${session.name}"? This cannot be undone.`,
+          );
+          if (confirmed) {
+            store.deleteSession(sessionId);
+          }
+          break;
+        }
         case "toggle_sidebar":
           store.toggleSidebar();
           break;
@@ -671,7 +786,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   cleanupEventListeners: () => {
+    if (streamRafId !== null && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(streamRafId);
+    }
+    streamRafId = null;
+    streamBuffer = "";
     get()._unlisteners.forEach((fn) => fn());
     set({ _unlisteners: [] });
   },
-}));
+  });
+});

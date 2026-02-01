@@ -40,6 +40,7 @@ export interface SearchResult {
 export interface SendMessageRequest {
   session_id: string;
   content: string;
+  retry?: boolean;
 }
 
 export interface StreamChunk {
@@ -48,6 +49,7 @@ export interface StreamChunk {
   search_query?: string;
   search_results?: SearchResult[];
   error?: string;
+  session_id?: string;
 }
 
 // Document types
@@ -116,6 +118,13 @@ export interface HealthStatus {
   errors: string[];
 }
 
+export interface ErrorResponse {
+  code: string;
+  message: string;
+  recoverable: boolean;
+  action?: string;
+}
+
 // Model management
 export interface ModelPullProgress {
   status: string;
@@ -133,4 +142,5 @@ export type OnboardingStep =
   | "welcome"
   | "install-ollama"
   | "download-model"
+  | "search"
   | "ready";

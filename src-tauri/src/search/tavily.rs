@@ -1,4 +1,3 @@
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use super::{SearchError, SearchResult};
@@ -24,12 +23,14 @@ struct TavilyResult {
     score: f64,
 }
 
-pub async fn search(api_key: &str, query: &str) -> Result<Vec<SearchResult>, SearchError> {
+pub async fn search(
+    client: &reqwest::Client,
+    api_key: &str,
+    query: &str,
+) -> Result<Vec<SearchResult>, SearchError> {
     if api_key.is_empty() {
         return Err(SearchError::InvalidApiKey);
     }
-
-    let client = Client::new();
 
     let response = client
         .post("https://api.tavily.com/search")

@@ -25,8 +25,18 @@ impl Database {
         Ok(db)
     }
 
+    pub fn new_in_memory() -> Result<Self, rusqlite::Error> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        let db = Self {
+            conn: Mutex::new(conn),
+        };
+        db.initialize()?;
+        Ok(db)
+    }
+
     fn initialize(&self) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS sessions (
@@ -58,6 +68,10 @@ impl Database {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY
+            );
+            INSERT OR IGNORE INTO schema_migrations (version) VALUES (1);
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
             CREATE INDEX IF NOT EXISTS idx_documents_session ON documents(session_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC);
@@ -67,14 +81,14 @@ impl Database {
     }
 
     pub fn is_ok(&self) -> bool {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.execute_batch("SELECT 1").is_ok()
     }
 
     // ---- Sessions ----
 
     pub fn create_session(&self, name: Option<&str>) -> Result<Session, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         let id = uuid::Uuid::new_v4().to_string();
         let session_name = name.unwrap_or("New Project");
 
@@ -87,7 +101,7 @@ impl Database {
     }
 
     pub fn get_sessions(&self) -> Result<Vec<Session>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, status, created_at, updated_at FROM sessions ORDER BY updated_at DESC",
         )?;
@@ -107,7 +121,7 @@ impl Database {
     }
 
     pub fn get_session(&self, session_id: &str) -> Result<Session, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         Self::read_session_row(&conn, session_id)
     }
 
@@ -117,7 +131,7 @@ impl Database {
         name: Option<&str>,
         status: Option<&str>,
     ) -> Result<Session, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         if let Some(n) = name {
             conn.execute(
@@ -136,7 +150,7 @@ impl Database {
     }
 
     pub fn delete_session(&self, session_id: &str) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
         Ok(())
     }
@@ -167,20 +181,18 @@ impl Database {
         content: &str,
         metadata: Option<&str>,
     ) -> Result<Message, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let mut conn = self.conn();
         let id = uuid::Uuid::new_v4().to_string();
-
-        conn.execute(
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT INTO messages (id, session_id, role, content, metadata) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![id, session_id, role, content, metadata],
         )?;
-
-        conn.execute(
+        tx.execute(
             "UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
             params![session_id],
         )?;
-
-        conn.query_row(
+        let msg = tx.query_row(
             "SELECT id, session_id, role, content, metadata, created_at FROM messages WHERE id = ?1",
             params![id],
             |row| {
@@ -193,11 +205,13 @@ impl Database {
                     created_at: row.get(5)?,
                 })
             },
-        )
+        )?;
+        tx.commit()?;
+        Ok(msg)
     }
 
     pub fn get_messages(&self, session_id: &str) -> Result<Vec<Message>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT id, session_id, role, content, metadata, created_at FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
         )?;
@@ -217,7 +231,7 @@ impl Database {
     }
 
     pub fn message_count(&self, session_id: &str) -> Result<i64, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.query_row(
             "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND role = 'user'",
             params![session_id],
@@ -227,13 +241,14 @@ impl Database {
 
     // ---- Documents ----
 
+    #[allow(dead_code)]
     pub fn save_document(
         &self,
         session_id: &str,
         filename: &str,
         content: &str,
     ) -> Result<GeneratedDocument, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         let id = uuid::Uuid::new_v4().to_string();
 
         conn.execute(
@@ -260,7 +275,7 @@ impl Database {
         &self,
         session_id: &str,
     ) -> Result<Vec<GeneratedDocument>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT id, session_id, filename, content, created_at FROM documents WHERE session_id = ?1 ORDER BY created_at ASC",
         )?;
@@ -278,8 +293,9 @@ impl Database {
         rows.collect()
     }
 
+    #[allow(dead_code)]
     pub fn delete_documents(&self, session_id: &str) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.execute(
             "DELETE FROM documents WHERE session_id = ?1",
             params![session_id],
@@ -287,11 +303,50 @@ impl Database {
         Ok(())
     }
 
+    pub fn replace_documents(
+        &self,
+        session_id: &str,
+        docs: &[(String, String)],
+    ) -> Result<Vec<GeneratedDocument>, rusqlite::Error> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM documents WHERE session_id = ?1",
+            params![session_id],
+        )?;
+
+        let mut inserted = Vec::with_capacity(docs.len());
+        for (filename, content) in docs {
+            let id = uuid::Uuid::new_v4().to_string();
+            tx.execute(
+                "INSERT INTO documents (id, session_id, filename, content) VALUES (?1, ?2, ?3, ?4)",
+                params![id, session_id, filename, content],
+            )?;
+
+            let doc = tx.query_row(
+                "SELECT id, session_id, filename, content, created_at FROM documents WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(GeneratedDocument {
+                        id: row.get(0)?,
+                        session_id: row.get(1)?,
+                        filename: row.get(2)?,
+                        content: row.get(3)?,
+                        created_at: row.get(4)?,
+                    })
+                },
+            )?;
+            inserted.push(doc);
+        }
+        tx.commit()?;
+        Ok(inserted)
+    }
+
     pub fn latest_document_time(
         &self,
         session_id: &str,
     ) -> Result<Option<String>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.query_row(
             "SELECT MAX(created_at) FROM documents WHERE session_id = ?1",
             params![session_id],
@@ -300,7 +355,7 @@ impl Database {
     }
 
     pub fn latest_message_time(&self, session_id: &str) -> Result<Option<String>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.query_row(
             "SELECT MAX(created_at) FROM messages WHERE session_id = ?1",
             params![session_id],
@@ -311,7 +366,7 @@ impl Database {
     // ---- Preferences ----
 
     pub fn get_preference(&self, key: &str) -> Result<Option<String>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         match conn.query_row(
             "SELECT value FROM preferences WHERE key = ?1",
             params![key],
@@ -324,12 +379,16 @@ impl Database {
     }
 
     pub fn set_preference(&self, key: &str, value: &str) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.execute(
             "INSERT OR REPLACE INTO preferences (key, value) VALUES (?1, ?2)",
             params![key, value],
         )?;
         Ok(())
+    }
+
+    fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 

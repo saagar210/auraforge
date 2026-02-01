@@ -6,7 +6,7 @@ import {
   Loader2,
   ExternalLink,
 } from "lucide-react";
-import { open as shellOpen } from "@tauri-apps/plugin-shell";
+import { openUrl as shellOpen } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import { useChatStore } from "../stores/chatStore";
 import type { OnboardingStep, DiskSpace } from "../types";
@@ -15,6 +15,7 @@ const STEPS: OnboardingStep[] = [
   "welcome",
   "install-ollama",
   "download-model",
+  "search",
   "ready",
 ];
 
@@ -51,27 +52,34 @@ export function OnboardingWizard() {
     cancelPullModel,
     createSession,
     setShowSettings,
+    updateSearchConfig,
   } = useChatStore();
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [diskSpace, setDiskSpace] = useState<DiskSpace | null>(null);
   const [configModel, setConfigModel] = useState<string>("");
+  const [searchEnabled, setSearchEnabled] = useState(true);
+  const [searchProvider, setSearchProvider] = useState<"tavily" | "duckduckgo">("duckduckgo");
+  const [tavilyKey, setTavilyKey] = useState("");
 
   // Load config model name on mount
   useEffect(() => {
-    invoke<{ llm: { model: string } }>("get_config").then((config) => {
+    invoke<{ llm: { model: string }; search: { enabled: boolean; provider: string; tavily_api_key: string } }>(
+      "get_config",
+    ).then((config) => {
       setConfigModel(config.llm.model);
+      setSearchEnabled(config.search.enabled);
+      setSearchProvider(config.search.provider === "tavily" ? "tavily" : "duckduckgo");
+      setTavilyKey(config.search.tavily_api_key);
     });
   }, []);
 
-  // Auto-poll health every 3s during install-ollama step
+  // Auto-poll health every 3s while onboarding is open
   useEffect(() => {
-    if (wizardStep === "install-ollama") {
-      intervalRef.current = setInterval(() => checkHealth(), 3000);
-      return () => {
-        if (intervalRef.current) clearInterval(intervalRef.current);
-      };
-    }
+    intervalRef.current = setInterval(() => checkHealth(), 3000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [wizardStep, checkHealth]);
 
   // Auto-advance from install-ollama when Ollama connects
@@ -91,7 +99,7 @@ export function OnboardingWizard() {
       wizardStep === "download-model" &&
       healthStatus?.ollama_model_available
     ) {
-      const timer = setTimeout(() => setWizardStep("ready"), 1000);
+      const timer = setTimeout(() => setWizardStep("search"), 1000);
       return () => clearTimeout(timer);
     }
   }, [wizardStep, healthStatus?.ollama_model_available, setWizardStep]);
@@ -117,6 +125,17 @@ export function OnboardingWizard() {
     await completeWizard();
     await createSession();
   }, [completeWizard, createSession]);
+
+  const handleSaveSearch = useCallback(async () => {
+    await updateSearchConfig({
+      enabled: searchEnabled,
+      provider: searchEnabled ? searchProvider : "none",
+      tavily_api_key: searchProvider === "tavily" ? tavilyKey : "",
+      searxng_url: "",
+      proactive: true,
+    });
+    setWizardStep("ready");
+  }, [searchEnabled, searchProvider, tavilyKey, updateSearchConfig, setWizardStep]);
 
   const progressPercent =
     modelPullProgress?.total && modelPullProgress?.completed
@@ -348,7 +367,76 @@ export function OnboardingWizard() {
             </div>
           )}
 
-          {/* Step 4: Ready */}
+          {/* Step 4: Web Search */}
+          {wizardStep === "search" && (
+            <div>
+              <h2 className="text-xl font-heading font-semibold text-text-primary mb-3 text-center">
+                Web Search (Optional)
+              </h2>
+              <p className="text-sm text-text-secondary mb-4">
+                Enable web search to ground answers in current best practices. You can use free
+                DuckDuckGo or add a Tavily API key for higher-quality results.
+              </p>
+
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm text-text-primary">Enable web search</span>
+                <button
+                  onClick={() => setSearchEnabled((prev) => !prev)}
+                  className={`relative w-10 h-5 rounded-full transition-colors duration-200 cursor-pointer border-none ${
+                    searchEnabled ? "bg-accent-gold" : "bg-surface"
+                  }`}
+                  role="switch"
+                  aria-checked={searchEnabled}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${
+                      searchEnabled ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {searchEnabled && (
+                <div className="space-y-3">
+                  <label className="block text-sm text-text-secondary">
+                    Provider
+                    <select
+                      value={searchProvider}
+                      onChange={(e) =>
+                        setSearchProvider(e.target.value as "tavily" | "duckduckgo")
+                      }
+                      className="w-full mt-1.5 px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                    >
+                      <option value="duckduckgo">DuckDuckGo (Free)</option>
+                      <option value="tavily">Tavily (API Key)</option>
+                    </select>
+                  </label>
+
+                  {searchProvider === "tavily" && (
+                    <label className="block text-sm text-text-secondary">
+                      Tavily API Key
+                      <input
+                        type="password"
+                        value={tavilyKey}
+                        onChange={(e) => setTavilyKey(e.target.value)}
+                        placeholder="tvly-..."
+                        className="w-full mt-1.5 px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
+
+              <button
+                onClick={handleSaveSearch}
+                className="mt-5 w-full px-4 py-2.5 bg-accent-gold text-void text-sm font-medium rounded-lg hover:bg-accent-gold/90 transition-colors cursor-pointer border-none"
+              >
+                Continue
+              </button>
+            </div>
+          )}
+
+          {/* Step 5: Ready */}
           {wizardStep === "ready" && (
             <div className="text-center">
               <Flame

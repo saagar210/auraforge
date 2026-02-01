@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { X, RotateCcw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useChatStore } from "../stores/chatStore";
-import type { AppConfig, LLMConfig, SearchConfig, OutputConfig } from "../types";
+import type { AppConfig, LLMConfig, SearchConfig, OutputConfig, UIConfig } from "../types";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -42,6 +42,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   // Output state
   const [includeConversation, setIncludeConversation] = useState(true);
   const [defaultSavePath, setDefaultSavePath] = useState("~/Projects");
+  const [uiTheme, setUiTheme] = useState<UIConfig["theme"]>("dark");
 
   useEffect(() => {
     if (open) {
@@ -59,6 +60,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         setProactive(config.search.proactive);
         setIncludeConversation(config.output.include_conversation);
         setDefaultSavePath(config.output.default_save_path);
+        setUiTheme(config.ui.theme);
       });
       // Load installed models for dropdown
       listModels();
@@ -91,7 +93,11 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       default_save_path: defaultSavePath,
     };
 
-    await updateConfig({ llm, search, output });
+    const ui: UIConfig = {
+      theme: uiTheme,
+    };
+
+    await updateConfig({ llm, search, ui, output });
     setSaving(false);
     onClose();
   };
