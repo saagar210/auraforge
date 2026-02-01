@@ -67,6 +67,7 @@ interface ChatState {
   // Loading
   sessionsLoading: boolean;
   messagesLoading: boolean;
+  preferencesLoaded: boolean;
 
   // Actions
   checkHealth: () => Promise<HealthStatus | null>;
@@ -170,6 +171,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   config: null,
   sessionsLoading: false,
   messagesLoading: false,
+  preferencesLoaded: false,
   _unlisteners: [],
 
   setShowSettings: (show: boolean) => set({ showSettings: show }),
@@ -431,9 +433,11 @@ export const useChatStore = create<ChatState>((set, get) => {
         wizardCompleted: wizardDone === "true",
         onboardingDismissed: wizardDone === "true",
         isFirstSession: firstSessionDone !== "true",
+        preferencesLoaded: true,
       });
     } catch (e) {
       console.error("Failed to load preferences:", e);
+      set({ preferencesLoaded: true });
     }
   },
 

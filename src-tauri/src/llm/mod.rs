@@ -278,10 +278,11 @@ impl OllamaClient {
             .await
             .map_err(|e| AppError::LlmRequest(format!("Failed to parse Ollama response: {}", e)))?;
 
+        let model_base = model.split(':').next().unwrap_or(model);
         Ok(tags.models.iter().any(|m| {
             m.name == model
-                || m.name
-                    .starts_with(&format!("{}:", model.split(':').next().unwrap_or(model)))
+                || (!model.contains(':')
+                    && m.name.starts_with(&format!("{}:", model_base)))
         }))
     }
 

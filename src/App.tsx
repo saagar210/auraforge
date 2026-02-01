@@ -47,6 +47,8 @@ function App() {
     documentsStale,
     showPreview,
     healthStatus,
+    wizardCompleted,
+    preferencesLoaded,
     isFirstSession,
     showSettings,
     showHelp,
@@ -91,13 +93,15 @@ function App() {
     return () => cleanupEventListeners();
   }, []);
 
-  // Show onboarding wizard if not completed
+  // Show onboarding wizard if health fails OR wizard hasn't been completed
   const showOnboarding =
     healthStatus !== null &&
+    preferencesLoaded &&
     (!healthStatus.ollama_connected ||
       !healthStatus.ollama_model_available ||
       !healthStatus.database_ok ||
-      !healthStatus.config_valid);
+      !healthStatus.config_valid ||
+      !wizardCompleted);
 
   // Derived state
   const { userMessageCount, assistantMessageCount } = useMemo(() => {

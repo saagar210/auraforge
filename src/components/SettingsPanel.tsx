@@ -24,6 +24,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [isAdvanced, setIsAdvanced] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("llm");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // LLM state
   const [llmProvider, setLlmProvider] = useState("ollama");
@@ -97,9 +98,14 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       theme: uiTheme,
     };
 
-    await updateConfig({ llm, search, ui, output });
+    const result = await updateConfig({ llm, search, ui, output });
     setSaving(false);
-    onClose();
+    if (result) {
+      setSaveError(null);
+      onClose();
+    } else {
+      setSaveError("Invalid settings. Check your provider, API keys, and URLs.");
+    }
   };
 
   const handleRerunSetup = async () => {
@@ -471,7 +477,11 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-border-subtle flex justify-end gap-3">
+        <div className="px-6 py-4 border-t border-border-subtle">
+          {saveError && (
+            <p className="text-xs text-status-error mb-3">{saveError}</p>
+          )}
+          <div className="flex justify-end gap-3">
           <button
             onClick={onClose}
             className="px-4 py-2 text-sm text-text-secondary bg-transparent border border-border-default rounded-lg hover:text-text-primary hover:border-text-muted transition-colors cursor-pointer"
@@ -485,6 +495,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           >
             {saving ? "Saving..." : "Save"}
           </button>
+          </div>
         </div>
       </div>
     </div>

@@ -117,7 +117,7 @@ impl Default for AppConfig {
             },
             search: SearchConfig {
                 enabled: true,
-                provider: "tavily".to_string(),
+                provider: "duckduckgo".to_string(),
                 tavily_api_key: String::new(),
                 searxng_url: String::new(),
                 proactive: true,
