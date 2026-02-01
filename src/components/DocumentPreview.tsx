@@ -8,7 +8,7 @@ import { Copy, Check, RefreshCw, FolderDown } from "lucide-react";
 import { clsx } from "clsx";
 import type { GeneratedDocument } from "../types";
 
-const TAB_ORDER = ["README.md", "SPEC.md", "CLAUDE.md", "PROMPTS.md", "CONVERSATION.md"];
+const TAB_ORDER = ["START_HERE.md", "README.md", "SPEC.md", "CLAUDE.md", "PROMPTS.md", "CONVERSATION.md"];
 
 const markdownComponents = {
   a({ href, children }: { href?: string; children?: React.ReactNode }) {
@@ -169,7 +169,7 @@ export function DocumentPreview({
   regenerating,
   onSave,
 }: DocumentPreviewProps) {
-  const [activeTab, setActiveTab] = useState("README.md");
+  const [activeTab, setActiveTab] = useState("START_HERE.md");
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 

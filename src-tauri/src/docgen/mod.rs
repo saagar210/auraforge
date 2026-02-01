@@ -41,12 +41,13 @@ pub async fn generate_all_documents(
     let mut drafts: Vec<(String, String)> = Vec::new();
     let include_conversation = config.output.include_conversation;
 
-    // Order: SPEC → CLAUDE → PROMPTS → README (cross-referencing order)
+    // Order: SPEC → CLAUDE → PROMPTS → README → START_HERE (cross-referencing order)
     let doc_configs = [
         ("SPEC.md", SPEC_PROMPT),
         ("CLAUDE.md", CLAUDE_PROMPT),
         ("PROMPTS.md", PROMPTS_PROMPT),
         ("README.md", README_PROMPT),
+        ("START_HERE.md", START_HERE_PROMPT),
     ];
 
     let total = doc_configs.len() + if include_conversation { 1 } else { 0 };
@@ -64,9 +65,20 @@ pub async fn generate_all_documents(
         );
 
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let previously_generated = if drafts.is_empty() {
+            "No documents generated yet.".to_string()
+        } else {
+            drafts
+                .iter()
+                .map(|(name, content)| format!("## {}\n\n{}", name, content))
+                .collect::<Vec<_>>()
+                .join("\n\n---\n\n")
+        };
+
         let prompt = prompt_template
             .replace("{conversation_history}", &conversation)
-            .replace("{current_date}", &today);
+            .replace("{current_date}", &today)
+            .replace("{previously_generated_docs}", &previously_generated);
 
         let llm_messages = vec![
             ChatMessage {
