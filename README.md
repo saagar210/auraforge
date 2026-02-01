@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="screenshots/hero.png" alt="AuraForge" width="720" />
-</p>
-
 <h1 align="center">AuraForge</h1>
 
 <p align="center">
@@ -64,18 +60,18 @@ AuraForge is a planning partner that thinks with you, not for you. You describe 
 | **2. Refine through dialogue** | AuraForge asks clarifying questions — scope, tech choices, trade-offs. Web search provides current context automatically when it detects technical topics. |
 | **3. Converge on decisions** | The conversation narrows from broad idea to concrete plan. Tech stack, architecture, phases — all decided collaboratively. |
 | **4. Forge the plan** | After 3+ exchanges, click **Forge the Plan** to generate all six documents from your conversation. |
-| **5. Save and build** | Export to a folder. Open `START_HERE.md` for setup instructions. Drop `CLAUDE.md` in your project root. Follow `PROMPTS.md` phase by phase. |
+| **5. Save and build** | Export to a folder. Open `START_HERE.md` — it walks you through setup, copying `CLAUDE.md`, and pasting your first prompt into Claude Code. |
 
 ### The Six Documents
 
 | Document | Purpose |
 |----------|---------|
-| **START_HERE.md** | Quick-start bridge document — prerequisites, step-by-step setup, your first prompt to paste into Claude Code. Read this first. |
-| **SPEC.md** | Complete technical specification — data models, interface contracts in real language, acceptance criteria, [TBD] markers for undiscussed topics. |
-| **CLAUDE.md** | Project context file for Claude Code. Drop it in your repo root and Claude understands your entire project. Includes anti-patterns section. |
-| **PROMPTS.md** | Phased implementation prompts with complexity indicators, watch-out sections, and cross-references to SPEC.md + CLAUDE.md. |
-| **README.md** | Planning folder orientation — what's here, key decisions, known gaps. |
-| **CONVERSATION.md** | Full planning transcript generated directly from session data (no LLM needed). Revisit to understand _why_ decisions were made. |
+| **START_HERE.md** | Quick-start bridge — prerequisites, step-by-step setup, your first Claude Code prompt. Non-technical friendly. |
+| **SPEC.md** | Technical specification with interface contracts in real code (Rust structs, TS interfaces — not pseudocode). Undiscussed topics marked `[TBD]`. |
+| **CLAUDE.md** | Project context for Claude Code — tech stack, commands, conventions, and anti-patterns. Drop in your repo root. |
+| **PROMPTS.md** | Phased implementation with complexity indicators, per-phase prerequisites, verification checklists, and cross-references to SPEC.md + CLAUDE.md. |
+| **README.md** | Planning folder orientation — key decisions, known gaps, document guide. |
+| **CONVERSATION.md** | Full planning transcript from session data (no LLM needed). Revisit to understand _why_ decisions were made. |
 
 Documents are generated sequentially with cross-referencing — each document receives all previously generated documents as context, ensuring consistency across the entire output.
 
@@ -84,13 +80,16 @@ Documents are generated sequentially with cross-referencing — each document re
 ## Feature Highlights
 
 ### Conversational Planning with Streaming
-Natural dialogue powered by Ollama's local LLM inference. Responses stream token-by-token via NDJSON parsing with `requestAnimationFrame`-batched rendering to prevent excessive re-renders. Cancel mid-stream with an `AtomicBool` flag checked per chunk. Retry any response — the old assistant message is deleted from the database before streaming the replacement.
+Natural dialogue powered by Ollama's local LLM inference. Responses stream token-by-token via NDJSON parsing with `requestAnimationFrame`-batched rendering to prevent excessive re-renders. Cancel mid-stream with an `AtomicBool` flag checked per chunk. Retry any response — the old assistant message is deleted from the database before streaming the replacement. v0.2.0 conversations go deeper — AuraForge limits itself to two questions per turn, finishes one topic before moving to the next, and pushes back on vague answers before allowing generation.
 
 ### Grounded in Reality via Web Search
 Three search providers with automatic failover: **DuckDuckGo** (free, HTML scraping with multi-selector fallback), **Tavily** (API-based, higher quality), and **SearXNG** (self-hosted). Search triggers automatically when the conversation involves technical topics — detected by matching against 46 technology keywords and 25 trigger patterns. Results are injected as system context so the LLM can reference current versions, best practices, and real-world trade-offs.
 
-### Six-Document Generation Pipeline with Cross-Referencing
-Sequential generation in dependency order: SPEC → CLAUDE → PROMPTS → README → START_HERE. Each document receives all previously generated documents as context, enabling cross-referencing (e.g., PROMPTS.md references exact conventions from CLAUDE.md). Prompts include negative/positive examples, tech stack consistency checks, and information categorization (Decided/Implied/Unknown). Output validation retries once if a document doesn't start with a proper heading (`#`). Documents are stored atomically — old versions are deleted and new ones inserted in a single database transaction. Staleness detection compares the latest message timestamp against document generation time.
+### Six-Document Generation with Cross-Referencing
+Sequential generation in dependency order: SPEC → CLAUDE → PROMPTS → README → START_HERE. Each document receives all previously generated documents as context, enabling cross-referencing (e.g., PROMPTS.md references exact conventions from CLAUDE.md, START_HERE.md generates setup steps matching the actual tech stack). Documents use `[TBD — not discussed during planning]` markers for undiscussed topics instead of inventing content. Output validation retries once if a document doesn't start with a proper heading (`#`). Documents are stored atomically — old versions are deleted and new ones inserted in a single database transaction. Staleness detection compares the latest message timestamp against document generation time.
+
+### Planning Readiness Tracking
+When you trigger document generation, AuraForge assesses conversation coverage across key planning topics: problem statement, user flow, tech stack, data model, and scope boundaries. If gaps exist, it reports them and offers to fill them or proceed with `[TBD]` markers — advisory only, never blocks generation. This prevents shipping incomplete plans without the user realizing what's missing.
 
 ### Local-First and Private
 All data stays on your machine. Conversations live in a local SQLite database with WAL mode. Config is stored as YAML in `~/.auraforge/`. The only network calls are to your local Ollama instance and (optionally) web search providers. No telemetry, no cloud sync, no API keys required to get started.
@@ -231,7 +230,7 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 | `cargo clippy -- -D warnings` | **0 warnings** |
 | `npx tsc --noEmit` | **0 errors** |
 | `npm run tauri build` | **Produces .app + .dmg** |
-| Source lines | **~8,067** across Rust, TypeScript, and CSS |
+| Source lines | **~8,825** across Rust, TypeScript, and CSS |
 | Rust test coverage | Config parsing, DB operations, search trigger detection (18 cases), URL extraction, model matching, message deletion |
 
 ### What's Tested
@@ -260,6 +259,20 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 ---
 
 ## Roadmap
+
+### Shipped
+
+**v0.1.0** — Core planning engine, conversational AI, five-document generation, web search, forge aesthetic, .dmg distribution.
+
+**v0.2.0** — Document quality overhaul: advisory readiness system, deeper conversations (topic-at-a-time, pushback on vague answers), reality-grounded generation (real code not pseudocode, tech-stack-consistent commands), cross-referenced documents, hallucination guardrails with `[TBD]` markers, START_HERE.md as 6th document.
+
+### Next
+
+- [ ] Confidence scoring — post-generation assessment of document completeness
+- [ ] Planning coverage UI — sidebar indicator tracking topic coverage during conversation
+- [ ] Audit report fixes — structured error handling (`AppError`), transaction safety, CSP hardening (see AUDIT_REPORT.md)
+
+### Future
 
 - [ ] Windows and Linux builds
 - [ ] Multiple LLM providers (Anthropic API, OpenAI) alongside Ollama

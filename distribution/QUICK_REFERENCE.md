@@ -9,8 +9,8 @@
 | **Cmd + S** | Save documents to folder |
 | **Cmd + ,** | Open settings |
 | **Cmd + \\** | Toggle sidebar |
-| **Cmd + P** | Toggle document preview |
-| **Cmd + ?** | Open help panel |
+| **Cmd + Shift + P** | Toggle document preview |
+| **Cmd + /** | Open help panel |
 | **Escape** | Close any open panel |
 
 ## Workflow
@@ -23,13 +23,16 @@ Describe your idea  -->  Answer questions  -->  Forge the Plan  -->  Save to fol
 2. Describe what you want to build
 3. Answer the clarifying questions AuraForge asks
 4. When ready, click **Forge the Plan** (Cmd+G)
-5. Review the generated documents in the preview panel (Cmd+P)
+5. Review the generated documents in the preview panel (Cmd+Shift+P)
 6. Save to a folder on your machine (Cmd+S)
+
+Or: Open `START_HERE.md` in your saved folder — it walks you through everything from there.
 
 ## Generated Documents
 
 | File | What It Is |
 |------|-----------|
+| **START_HERE.md** | Quick-start guide — read this first, walks you through setup |
 | **README.md** | Overview of your project plan |
 | **SPEC.md** | Detailed technical specification |
 | **CLAUDE.md** | Context file for Claude Code — drop it in your project root |
