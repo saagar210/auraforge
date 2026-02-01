@@ -377,11 +377,16 @@ pub async fn send_message(
             .db
             .get_messages(&session_id)
             .map_err(to_response)?;
-        messages
+        let last_user = messages
             .into_iter()
             .rev()
             .find(|m| m.role == "user")
-            .ok_or_else(|| to_response(AppError::Unknown("No user message found to retry".to_string())))?
+            .ok_or_else(|| to_response(AppError::Unknown("No user message found to retry".to_string())))?;
+        // Remove the old assistant response to avoid duplicates
+        if let Err(e) = state.db.delete_last_assistant_message(&session_id) {
+            log::warn!("Failed to delete old assistant message on retry: {}", e);
+        }
+        last_user
     } else {
         state
             .db

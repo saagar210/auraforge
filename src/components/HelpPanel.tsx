@@ -153,7 +153,8 @@ export function HelpPanel({ open, onClose }: HelpPanelProps) {
                     ["⌘ S", "Save to folder"],
                     ["⌘ ,", "Settings"],
                     ["⌘ \\", "Toggle sidebar"],
-                    ["⌘ P", "Toggle preview"],
+                    ["⇧⌘ P", "Toggle preview"],
+                    ["⌘ /", "Toggle help"],
                     ["⌘ Enter", "Send message"],
                     ["Escape", "Close panel"],
                   ].map(([key, desc]) => (

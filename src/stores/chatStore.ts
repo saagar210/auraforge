@@ -110,6 +110,7 @@ interface ChatState {
 
   // Toast
   toast: { message: string; type: "success" | "error"; actionPath?: string } | null;
+  showToast: (message: string, type: "success" | "error") => void;
   dismissToast: () => void;
 
   // Internal tracking
@@ -647,6 +648,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
   },
 
+  showToast: (message: string, type: "success" | "error") =>
+    set({ toast: { message, type } }),
   dismissToast: () => set({ toast: null }),
 
   // ============ EVENT LISTENERS ============

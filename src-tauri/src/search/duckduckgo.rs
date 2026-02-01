@@ -37,25 +37,73 @@ fn urlencoding(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 
+/// Selector sets to try in order. DDG has changed its HTML structure before,
+/// so we attempt multiple known layouts.
+const SELECTOR_SETS: &[(&str, &str, &str)] = &[
+    // Current (2024-2026) layout
+    (".result", ".result__a", ".result__snippet"),
+    // Alternative class names seen in some DDG responses
+    (".web-result", ".result__a", ".result__snippet"),
+    (".result", "a.result__url", ".result__snippet"),
+];
+
 fn parse_results(html: &str) -> Result<Vec<SearchResult>, SearchError> {
     let document = Html::parse_document(html);
 
-    let result_sel =
-        Selector::parse(".result").map_err(|e| SearchError::ParseError(format!("{:?}", e)))?;
-    let link_sel =
-        Selector::parse(".result__a").map_err(|e| SearchError::ParseError(format!("{:?}", e)))?;
-    let snippet_sel = Selector::parse(".result__snippet")
-        .map_err(|e| SearchError::ParseError(format!("{:?}", e)))?;
+    // Try each selector set until one produces results
+    for (container, link, snippet) in SELECTOR_SETS {
+        if let Ok(results) = try_parse_with_selectors(&document, container, link, snippet) {
+            if !results.is_empty() {
+                return Ok(results);
+            }
+        }
+    }
+
+    // Fallback: extract DDG redirect links directly from the entire page
+    let fallback = extract_links_fallback(&document);
+    if !fallback.is_empty() {
+        log::warn!(
+            "DuckDuckGo primary selectors failed; used link-extraction fallback ({} results)",
+            fallback.len()
+        );
+        return Ok(fallback);
+    }
+
+    // Nothing worked — log diagnostic info
+    let body_len = html.len();
+    let has_noscript = html.contains("noscript");
+    log::warn!(
+        "DuckDuckGo returned HTML ({} bytes, noscript={}) but no results could be parsed. \
+         Selectors may be outdated.",
+        body_len,
+        has_noscript,
+    );
+
+    Err(SearchError::NoResults)
+}
+
+fn try_parse_with_selectors(
+    document: &Html,
+    container_sel: &str,
+    link_sel: &str,
+    snippet_sel: &str,
+) -> Result<Vec<SearchResult>, SearchError> {
+    let container =
+        Selector::parse(container_sel).map_err(|e| SearchError::ParseError(format!("{:?}", e)))?;
+    let link =
+        Selector::parse(link_sel).map_err(|e| SearchError::ParseError(format!("{:?}", e)))?;
+    let snippet =
+        Selector::parse(snippet_sel).map_err(|e| SearchError::ParseError(format!("{:?}", e)))?;
 
     let mut results = Vec::new();
 
-    for (i, result) in document.select(&result_sel).enumerate() {
+    for (i, result) in document.select(&container).enumerate() {
         if i >= 5 {
             break;
         }
 
         let title = result
-            .select(&link_sel)
+            .select(&link)
             .next()
             .map(|el| el.text().collect::<String>())
             .unwrap_or_default()
@@ -63,7 +111,7 @@ fn parse_results(html: &str) -> Result<Vec<SearchResult>, SearchError> {
             .to_string();
 
         let raw_url = result
-            .select(&link_sel)
+            .select(&link)
             .next()
             .and_then(|el| el.value().attr("href"))
             .unwrap_or_default()
@@ -71,15 +119,15 @@ fn parse_results(html: &str) -> Result<Vec<SearchResult>, SearchError> {
 
         let url = extract_ddg_url(&raw_url).unwrap_or(raw_url);
 
-        let snippet = result
-            .select(&snippet_sel)
+        let snippet_text = result
+            .select(&snippet)
             .next()
             .map(|el| el.text().collect::<String>())
             .unwrap_or_default()
             .trim()
             .to_string();
 
-        if title.is_empty() && snippet.is_empty() {
+        if title.is_empty() && snippet_text.is_empty() {
             continue;
         }
 
@@ -89,16 +137,54 @@ fn parse_results(html: &str) -> Result<Vec<SearchResult>, SearchError> {
         results.push(SearchResult {
             title,
             url,
-            snippet,
+            snippet: snippet_text,
             score,
         });
     }
 
-    if results.is_empty() {
-        return Err(SearchError::NoResults);
+    Ok(results)
+}
+
+/// Last-resort fallback: find all `<a>` tags with DDG redirect hrefs and extract
+/// the target URLs. This works even if DDG changes container/class names, as long
+/// as the redirect URL structure (`uddg=`) remains.
+fn extract_links_fallback(document: &Html) -> Vec<SearchResult> {
+    let a_sel = match Selector::parse("a[href]") {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut results = Vec::new();
+    let mut seen_urls = std::collections::HashSet::new();
+
+    for el in document.select(&a_sel) {
+        if results.len() >= 5 {
+            break;
+        }
+
+        let href = el.value().attr("href").unwrap_or_default();
+        if let Some(url) = extract_ddg_url(href) {
+            // Skip DDG internal links and duplicates
+            if url.contains("duckduckgo.com") || !seen_urls.insert(url.clone()) {
+                continue;
+            }
+
+            let title = el.text().collect::<String>().trim().to_string();
+            if title.is_empty() {
+                continue;
+            }
+
+            let score = 1.0 - (results.len() as f64 * 0.15);
+            results.push(SearchResult {
+                title,
+                url,
+                snippet: String::new(),
+                score,
+            });
+        }
     }
 
-    Ok(results)
+    results
 }
 
 fn extract_ddg_url(href: &str) -> Option<String> {

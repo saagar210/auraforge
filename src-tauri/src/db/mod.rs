@@ -230,6 +230,19 @@ impl Database {
         rows.collect()
     }
 
+    pub fn delete_last_assistant_message(&self, session_id: &str) -> Result<bool, rusqlite::Error> {
+        let conn = self.conn();
+        let rows = conn.execute(
+            "DELETE FROM messages WHERE id = (
+                SELECT id FROM messages
+                WHERE session_id = ?1 AND role = 'assistant'
+                ORDER BY created_at DESC LIMIT 1
+            )",
+            params![session_id],
+        )?;
+        Ok(rows > 0)
+    }
+
     pub fn message_count(&self, session_id: &str) -> Result<i64, rusqlite::Error> {
         let conn = self.conn();
         conn.query_row(
@@ -526,6 +539,32 @@ mod tests {
 
         let count = db.message_count(&session.id).unwrap();
         assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn delete_last_assistant_message_on_retry() {
+        let db = test_db();
+        let session = db.create_session(None).unwrap();
+
+        db.save_message(&session.id, "user", "q1", None).unwrap();
+        db.save_message(&session.id, "assistant", "old answer", None).unwrap();
+
+        let deleted = db.delete_last_assistant_message(&session.id).unwrap();
+        assert!(deleted);
+
+        let msgs = db.get_messages(&session.id).unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].role, "user");
+    }
+
+    #[test]
+    fn delete_last_assistant_noop_when_none() {
+        let db = test_db();
+        let session = db.create_session(None).unwrap();
+        db.save_message(&session.id, "user", "q1", None).unwrap();
+
+        let deleted = db.delete_last_assistant_message(&session.id).unwrap();
+        assert!(!deleted);
     }
 
     #[test]

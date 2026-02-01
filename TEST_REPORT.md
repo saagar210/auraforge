@@ -173,17 +173,17 @@
 
 ---
 
-## Known Issues (Not Fixed)
+## Previously Known Issues (Now Fixed)
 
-1. **`⌘+P` conflicts with system Print shortcut** — Toggle Preview uses `CmdOrCtrl+P`. Won't trigger system print (Tauri intercepts it) but may confuse users expecting Print. Design decision, not a bug.
+1. **`⌘+P` conflicts with system Print shortcut** — Changed Toggle Preview shortcut from `CmdOrCtrl+P` to `CmdOrCtrl+Shift+P`. Updated menu accelerator in `lib.rs` and label in `HelpPanel.tsx`.
 
-2. **Help panel shortcut label inconsistency** — Help panel shows `⌘ ?` but the JS handler triggers on `⌘+/`. The native menu uses `CmdOrCtrl+?` (which is `⇧⌘/`). Both paths work but display differently.
+2. **Help panel shortcut label inconsistency** — Aligned menu accelerator from `CmdOrCtrl+?` to `CmdOrCtrl+/` to match the JS handler. Added `⌘ /` entry to the Help panel shortcuts table.
 
-3. **Retry adds duplicate assistant messages** — When retrying, the old assistant response stays in the DB. The new response is appended. The user sees both. This may be intentional (preserving history) but could be confusing.
+3. **Retry adds duplicate assistant messages** — On retry, the last assistant message is now deleted from DB before streaming the new response. Added `delete_last_assistant_message()` to `db/mod.rs` with 2 unit tests.
 
-4. **DuckDuckGo scraping is fragile** — The search provider scrapes HTML from `html.duckduckgo.com/html/`. If DDG changes their markup, search will silently return no results.
+4. **DuckDuckGo scraping is fragile** — Added multi-selector fallback strategy: tries 3 selector sets, then falls back to DDG redirect link extraction (`uddg=`). Logs diagnostic warnings when selectors fail.
 
-5. **No periodic health re-check in main app** — Health is checked once on mount. If Ollama disconnects mid-session, there's no automatic recovery notification (only visible when a chat request fails).
+5. **No periodic health re-check in main app** — Added 60-second interval health check in `App.tsx`. Detects Ollama connection degradation and shows a toast notification when the connection drops mid-session.
 
 ---
 
@@ -193,7 +193,7 @@
 |-------|--------|
 | `cargo check` | PASS |
 | `cargo clippy -- -D warnings` | PASS (0 warnings) |
-| `cargo test` | PASS (36/36 tests) |
+| `cargo test` | PASS (39/39 tests) |
 | `npx tsc --noEmit` | PASS (0 errors) |
 | `npm run tauri build` | PASS |
 | `.app` bundle produced | YES |

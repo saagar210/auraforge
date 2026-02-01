@@ -116,7 +116,7 @@ pub fn run() {
                     "toggle_preview",
                     "Toggle Preview",
                     true,
-                    Some("CmdOrCtrl+P"),
+                    Some("CmdOrCtrl+Shift+P"),
                 )?)
                 .build()?;
 
@@ -143,7 +143,7 @@ pub fn run() {
                     "help_panel",
                     "AuraForge Help",
                     true,
-                    Some("CmdOrCtrl+?"),
+                    Some("CmdOrCtrl+/"),
                 )?)
                 .separator()
                 .item(&PredefinedMenuItem::about(app, None, None)?)

@@ -22,6 +22,7 @@ import { Toast } from "./components/Toast";
 import { EmberParticles } from "./components/EmberParticles";
 import { ThermalBackground } from "./components/ThermalBackground";
 import { useChatStore } from "./stores/chatStore";
+import type { HealthStatus } from "./types";
 import { friendlyError } from "./utils/errorMessages";
 import { resolveDefaultPath } from "./utils/paths";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -70,6 +71,7 @@ function App() {
     openFolder,
     markFirstSessionComplete,
     toast,
+    showToast,
     dismissToast,
     initEventListeners,
     cleanupEventListeners,
@@ -83,6 +85,8 @@ function App() {
   const prevScrollHeightRef = useRef<number | null>(null);
   const isAtBottomRef = useRef(true);
 
+  const prevHealthRef = useRef<HealthStatus | null>(null);
+
   // Initialize on mount
   useEffect(() => {
     loadPreferences();
@@ -92,6 +96,34 @@ function App() {
     initEventListeners();
     return () => cleanupEventListeners();
   }, []);
+
+  // Periodic health re-check every 60s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      checkHealth();
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Detect health degradation and notify user
+  useEffect(() => {
+    if (!healthStatus || !prevHealthRef.current) {
+      prevHealthRef.current = healthStatus;
+      return;
+    }
+    const wasOk =
+      prevHealthRef.current.ollama_connected &&
+      prevHealthRef.current.ollama_model_available;
+    const isOk =
+      healthStatus.ollama_connected && healthStatus.ollama_model_available;
+    if (wasOk && !isOk) {
+      showToast(
+        "Ollama connection lost. Check that Ollama is running.",
+        "error",
+      );
+    }
+    prevHealthRef.current = healthStatus;
+  }, [healthStatus]);
 
   // Show onboarding wizard if health fails OR wizard hasn't been completed
   const showOnboarding =
