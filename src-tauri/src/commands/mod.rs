@@ -229,23 +229,48 @@ pub struct DiskSpace {
 #[tauri::command]
 pub async fn check_disk_space() -> Result<DiskSpace, ErrorResponse> {
     let result = tauri::async_runtime::spawn_blocking(|| -> Result<DiskSpace, AppError> {
+        #[cfg(unix)]
+        {
+            // Use statvfs for accurate cross-platform Unix disk space check
+            use std::ffi::CString;
+            use std::mem::MaybeUninit;
+
+            let path = CString::new("/").unwrap();
+            let mut stat = MaybeUninit::<libc::statvfs>::uninit();
+            let ret = unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) };
+            if ret == 0 {
+                let stat = unsafe { stat.assume_init() };
+                let available_bytes = stat.f_bavail as u64 * stat.f_frsize;
+                let available_gb = available_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+                return Ok(DiskSpace {
+                    available_gb,
+                    sufficient: available_gb > 20.0,
+                });
+            }
+        }
+
+        // Fallback: try `df` command (works on macOS/Linux, fails gracefully elsewhere)
         let output = std::process::Command::new("df")
             .args(["-k", "/"])
-            .output()
-            .map_err(|e| AppError::FileSystem {
-                path: "/".to_string(),
-                message: e.to_string(),
-            })?;
+            .output();
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let available_kb: u64 = stdout
-            .lines()
-            .nth(1)
-            .and_then(|line| line.split_whitespace().nth(3))
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-
-        let available_gb = available_kb as f64 / 1_048_576.0;
+        let available_gb = match output {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let available_kb: u64 = stdout
+                    .lines()
+                    .nth(1)
+                    .and_then(|line| line.split_whitespace().nth(3))
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                available_kb as f64 / 1_048_576.0
+            }
+            Err(_) => {
+                // Cannot determine disk space (e.g., Windows without df)
+                log::warn!("Cannot determine disk space; assuming sufficient");
+                100.0
+            }
+        };
 
         Ok(DiskSpace {
             available_gb,
@@ -369,7 +394,7 @@ pub async fn send_message(
     if user_count == 1 && !is_retry {
         let auto_name: String = content.chars().take(60).collect();
         let auto_name = auto_name.trim().to_string();
-        let auto_name = if auto_name.len() < content.len() {
+        let auto_name = if content.chars().count() > 60 {
             format!("{}...", auto_name.trim_end())
         } else {
             auto_name
@@ -468,6 +493,7 @@ pub async fn send_message(
             &config.llm.model,
             chat_messages,
             config.llm.temperature,
+            Some(config.llm.max_tokens),
             &session_id,
             Some(cancel_flag.clone()),
         )
@@ -486,12 +512,14 @@ pub async fn send_message(
                 None
             };
 
-            let _ = state.db.save_message(
+            if let Err(e) = state.db.save_message(
                 &session_id,
                 "assistant",
                 &response_text,
                 metadata.as_deref(),
-            );
+            ) {
+                log::error!("Failed to save assistant message: {}", e);
+            }
         }
         Err(AppError::StreamCancelled) => {
             if let Ok(mut map) = state.stream_cancel.lock() {

@@ -5,7 +5,7 @@ interface ForgingProgressProps {
 }
 
 export function ForgingProgress({ current, total, filename }: ForgingProgressProps) {
-  const progress = current / total;
+  const progress = total > 0 ? current / total : 0;
   const circumference = 2 * Math.PI * 36;
   const dashoffset = circumference * (1 - progress);
 

@@ -141,6 +141,17 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
         )));
     }
 
+    if config.llm.model.trim().is_empty() {
+        return Err(ConfigError::MissingField("llm.model".to_string()));
+    }
+
+    if !(0.0..=2.0).contains(&config.llm.temperature) {
+        return Err(ConfigError::InvalidValue(format!(
+            "llm.temperature={} (must be 0.0-2.0)",
+            config.llm.temperature
+        )));
+    }
+
     if config.llm.base_url.trim().is_empty() {
         return Err(ConfigError::MissingField("llm.base_url".to_string()));
     }

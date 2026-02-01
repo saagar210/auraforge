@@ -103,7 +103,12 @@ export function StreamingMessage({ content }: StreamingMessageProps) {
         style={{ boxShadow: "0 0 10px #E8A045" }}
       />
       <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap break-words">
-        {content}
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={markdownComponents}
+        >
+          {content}
+        </ReactMarkdown>
         <span className="inline-block w-0.5 h-4 bg-accent-glow ml-0.5 align-middle animate-pulse" />
       </div>
     </div>

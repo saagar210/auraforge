@@ -77,21 +77,20 @@ const TRIGGER_PATTERNS: &[&str] = &[
 pub fn should_search(message: &str) -> Option<String> {
     let lower = message.to_lowercase();
 
+    let has_tech = TECH_KEYWORDS.iter().any(|k| lower.contains(k));
+
     for pattern in TRIGGER_PATTERNS {
         if pattern.contains('*') {
             let parts: Vec<&str> = pattern.split('*').collect();
             if parts.len() == 2 {
                 if let Some(start) = lower.find(parts[0]) {
-                    if lower[start..].contains(parts[1]) {
+                    if lower[start..].contains(parts[1]) && has_tech {
                         return Some(build_search_query(message));
                     }
                 }
             }
-        } else if lower.contains(pattern) {
-            let has_tech = TECH_KEYWORDS.iter().any(|k| lower.contains(k));
-            if has_tech {
-                return Some(build_search_query(message));
-            }
+        } else if lower.contains(pattern) && has_tech {
+            return Some(build_search_query(message));
         }
     }
 
@@ -184,8 +183,16 @@ mod tests {
 
     #[test]
     fn triggers_on_maintenance_wildcard() {
-        let result = should_search("Is moment.js still maintained?");
+        // Wildcard patterns now also require a tech keyword
+        let result = should_search("Is the React router still maintained?");
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn no_trigger_wildcard_without_tech() {
+        // "moment.js" is not in TECH_KEYWORDS, so wildcard alone shouldn't trigger
+        let result = should_search("Is my car still maintained?");
+        assert!(result.is_none());
     }
 
     #[test]
@@ -280,7 +287,7 @@ mod tests {
             "latest version of Next.js",
             "pros and cons of MongoDB",
             "which is better React or Angular",
-            "is lodash deprecated",
+            "is the node crypto module deprecated",
             "does prisma work with sqlite",
             "folder structure for React",
             "recommended database in 2026",

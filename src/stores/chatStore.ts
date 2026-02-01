@@ -112,6 +112,9 @@ interface ChatState {
   toast: { message: string; type: "success" | "error"; actionPath?: string } | null;
   dismissToast: () => void;
 
+  // Internal tracking
+  _generatingSessionId: string | null;
+
   // Event listeners
   _unlisteners: UnlistenFn[];
   initEventListeners: () => Promise<void>;
@@ -172,6 +175,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   sessionsLoading: false,
   messagesLoading: false,
   preferencesLoaded: false,
+  _generatingSessionId: null,
   _unlisteners: [],
 
   setShowSettings: (show: boolean) => set({ showSettings: show }),
@@ -417,6 +421,12 @@ export const useChatStore = create<ChatState>((set, get) => {
     } catch (e) {
       console.error("Failed to cancel response:", e);
     }
+    // Safety net: if backend fails to emit stream:done/error within 2s, force-reset
+    setTimeout(() => {
+      if (get().isStreaming && get().currentSessionId === sessionId) {
+        set({ isStreaming: false, streamingContent: "" });
+      }
+    }, 2000);
   },
 
   clearStreamError: () => set({ streamError: null }),
@@ -543,7 +553,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     const sessionId = get().currentSessionId;
     if (!sessionId || get().isGenerating) return;
 
-    set({ isGenerating: true, generateProgress: null });
+    set({ isGenerating: true, generateProgress: null, _generatingSessionId: sessionId });
 
     try {
       const documents = await invoke<GeneratedDocument[]>("generate_documents", {
@@ -676,6 +686,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       flushStreamBuffer();
       set({
         isStreaming: false,
+        streamingContent: "",
         streamError: event.payload.error ?? "Unknown streaming error",
         searchQuery: null,
         searchResults: null,
@@ -690,6 +701,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       flushStreamBuffer();
       set({
         isStreaming: false,
+        streamingContent: "",
         searchQuery: null,
         searchResults: null,
       });
@@ -699,14 +711,19 @@ export const useChatStore = create<ChatState>((set, get) => {
     const unlProgress = await listen<GenerateProgress>(
       "generate:progress",
       (event) => {
+        // Only update if we're still on the session that started generation
+        const genSession = get()._generatingSessionId;
+        if (genSession && genSession !== get().currentSessionId) return;
         set({ generateProgress: event.payload });
       },
     );
     unlisteners.push(unlProgress);
 
     const unlComplete = await listen<number>("generate:complete", () => {
-      // generateDocuments handles the final state, but ensure progress clears
-      set({ generateProgress: null });
+      // Only update if we're still on the session that started generation
+      const genSession = get()._generatingSessionId;
+      if (genSession && genSession !== get().currentSessionId) return;
+      set({ generateProgress: null, _generatingSessionId: null });
     });
     unlisteners.push(unlComplete);
 

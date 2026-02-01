@@ -19,6 +19,13 @@ pub async fn generate_all_documents(
         .get_messages(session_id)
         .map_err(AppError::from)?;
 
+    let user_msgs = messages.iter().any(|m| m.role == "user");
+    if !user_msgs {
+        return Err(AppError::Unknown(
+            "Cannot generate documents from an empty conversation".to_string(),
+        ));
+    }
+
     let session = state
         .db
         .get_session(session_id)
@@ -55,7 +62,10 @@ pub async fn generate_all_documents(
             },
         );
 
-        let prompt = prompt_template.replace("{conversation_history}", &conversation);
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let prompt = prompt_template
+            .replace("{conversation_history}", &conversation)
+            .replace("{current_date}", &today);
 
         let llm_messages = vec![
             ChatMessage {

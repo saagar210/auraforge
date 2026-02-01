@@ -32,6 +32,8 @@ struct OllamaChatRequest {
 #[derive(Debug, Serialize)]
 struct OllamaOptions {
     temperature: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    num_predict: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,6 +313,7 @@ impl OllamaClient {
         model: &str,
         messages: Vec<ChatMessage>,
         temperature: f64,
+        num_predict: Option<u64>,
         session_id: &str,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String, AppError> {
@@ -323,7 +326,10 @@ impl OllamaClient {
                 model: model.to_string(),
                 messages,
                 stream: true,
-                options: OllamaOptions { temperature },
+                options: OllamaOptions {
+                    temperature,
+                    num_predict: num_predict.map(|n| n as i64),
+                },
             })
             .timeout(std::time::Duration::from_secs(300))
             .send()
@@ -458,7 +464,10 @@ impl OllamaClient {
                 model: model.to_string(),
                 messages,
                 stream: false,
-                options: OllamaOptions { temperature },
+                options: OllamaOptions {
+                    temperature,
+                    num_predict: None, // Use Ollama's default for doc generation
+                },
             })
             .timeout(std::time::Duration::from_secs(300))
             .send()

@@ -48,7 +48,7 @@ export function ChatInput({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && e.metaKey) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleSend();
     }
@@ -99,7 +99,7 @@ export function ChatInput({
       </div>
       <div className="max-w-[720px] mx-auto mt-1.5">
         <span className="text-[11px] text-text-muted">
-          {disabled ? "Waiting for response..." : "\u2318 + Enter to send"}
+          {disabled ? "Waiting for response..." : "\u2318/Ctrl + Enter to send"}
         </span>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Flame, Trash2, MessageSquare, Settings, HelpCircle } from "lucide-react";
 import { clsx } from "clsx";
 import { useChatStore } from "../stores/chatStore";
@@ -18,15 +18,24 @@ export function Sidebar() {
   } = useChatStore();
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    };
+  }, []);
 
   const handleDelete = async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
     if (confirmDeleteId === sessionId) {
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
       await deleteSession(sessionId);
       setConfirmDeleteId(null);
     } else {
       setConfirmDeleteId(sessionId);
-      setTimeout(() => setConfirmDeleteId(null), 3000);
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = setTimeout(() => setConfirmDeleteId(null), 3000);
     }
   };
 

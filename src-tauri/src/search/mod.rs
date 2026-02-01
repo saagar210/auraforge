@@ -60,6 +60,7 @@ pub async fn execute_search(
                 SearchError::InvalidApiKey
                 | SearchError::RateLimited
                 | SearchError::NetworkError(_)
+                | SearchError::ParseError(_)
                 | SearchError::NoResults,
             ) => {
                 log::warn!(
@@ -68,10 +69,12 @@ pub async fn execute_search(
                 );
                 duckduckgo::search(client, query).await
             }
-            Err(e) => Err(e),
         },
         "duckduckgo" => duckduckgo::search(client, query).await,
         "searxng" => searxng::search(client, &config.searxng_url, query).await,
-        _ => Ok(vec![]),
+        other => {
+            log::warn!("Unknown search provider '{}', returning no results", other);
+            Ok(vec![])
+        }
     }
 }

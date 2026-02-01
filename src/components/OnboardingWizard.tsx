@@ -71,6 +71,8 @@ export function OnboardingWizard() {
       setSearchEnabled(config.search.enabled);
       setSearchProvider(config.search.provider === "tavily" ? "tavily" : "duckduckgo");
       setTavilyKey(config.search.tavily_api_key);
+    }).catch((e) => {
+      console.error("Failed to load config in onboarding:", e);
     });
   }, []);
 

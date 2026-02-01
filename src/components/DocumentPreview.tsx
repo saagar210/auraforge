@@ -1,4 +1,4 @@
-import { useState, memo } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
@@ -171,6 +171,13 @@ export function DocumentPreview({
 }: DocumentPreviewProps) {
   const [activeTab, setActiveTab] = useState("README.md");
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   // Sort documents by TAB_ORDER
   const sortedDocs = TAB_ORDER
@@ -185,9 +192,14 @@ export function DocumentPreview({
 
   const handleCopy = async () => {
     if (!activeDoc) return;
-    await navigator.clipboard.writeText(activeDoc.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(activeDoc.content);
+      setCopied(true);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      console.error("Failed to copy to clipboard");
+    }
   };
 
   if (sortedDocs.length === 0) return null;
