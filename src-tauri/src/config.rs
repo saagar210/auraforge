@@ -18,7 +18,7 @@ llm:
 # Web Search Settings
 search:
   enabled: true
-  provider: tavily                          # tavily | duckduckgo | searxng | none
+  provider: duckduckgo                      # tavily | duckduckgo | searxng | none
   tavily_api_key: ""                        # Required if using Tavily
   searxng_url: ""                           # Required if using SearXNG
   proactive: true                           # Auto-search during conversation
