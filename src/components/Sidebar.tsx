@@ -36,7 +36,6 @@ export function Sidebar() {
   // Inline rename state
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const renameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     return () => {
@@ -116,14 +115,15 @@ export function Sidebar() {
 
   const commitRename = useCallback(
     async (sessionId: string) => {
+      if (renamingId !== sessionId) return;
+      setRenamingId(null);
       const trimmed = editName.trim();
       const session = sessions.find((s) => s.id === sessionId);
       if (trimmed && session && trimmed !== session.name) {
         await renameSession(sessionId, trimmed);
       }
-      setRenamingId(null);
     },
-    [editName, sessions, renameSession],
+    [renamingId, editName, sessions, renameSession],
   );
 
   const cancelRename = useCallback(() => {
@@ -285,7 +285,6 @@ export function Sidebar() {
                   <div className="flex-1 min-w-0">
                     {renamingId === session.id ? (
                       <input
-                        ref={renameInputRef}
                         value={editName}
                         onChange={(e) => setEditName(e.target.value)}
                         onKeyDown={(e) => {

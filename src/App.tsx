@@ -147,7 +147,10 @@ function App() {
     }
     return { userMessageCount: users, assistantMessageCount: assistants };
   }, [messages]);
-  const isCurrentSessionGenerating = isGenerating && _generatingSessionId === currentSessionId;
+  const isCurrentSessionGenerating = useMemo(
+    () => isGenerating && _generatingSessionId === currentSessionId,
+    [isGenerating, _generatingSessionId, currentSessionId],
+  );
   const canForge = useMemo(
     () =>
       userMessageCount >= 3 &&
