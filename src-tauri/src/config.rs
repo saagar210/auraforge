@@ -10,7 +10,7 @@ const DEFAULT_CONFIG_YAML: &str = r#"# AuraForge Configuration
 # LLM Provider Settings
 llm:
   provider: ollama                          # ollama | anthropic | openai
-  model: qwen3-coder:30b-a3b-instruct-q4_K_M
+  model: qwen3-coder:30b-a3b-q4_K_M
   base_url: http://localhost:11434          # Ollama default
   temperature: 0.7
   max_tokens: 65536

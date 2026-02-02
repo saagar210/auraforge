@@ -117,7 +117,7 @@ impl Default for AppConfig {
         Self {
             llm: LLMConfig {
                 provider: "ollama".to_string(),
-                model: "qwen3-coder:30b-a3b-instruct-q4_K_M".to_string(),
+                model: "qwen3-coder:30b-a3b-q4_K_M".to_string(),
                 base_url: "http://localhost:11434".to_string(),
                 temperature: 0.7,
                 max_tokens: 65536,

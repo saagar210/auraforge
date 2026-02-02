@@ -179,7 +179,7 @@ See [`distribution/INSTALL.md`](distribution/INSTALL.md) for detailed instructio
 ```bash
 # Install Ollama and pull the default model
 brew install ollama
-ollama pull qwen3-coder:30b-a3b-instruct-q4_K_M
+ollama pull qwen3-coder:30b-a3b-q4_K_M
 
 # Clone and run
 git clone https://github.com/saagar210/auraforge.git

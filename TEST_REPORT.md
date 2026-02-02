@@ -22,7 +22,7 @@
 
 **File:** `src-tauri/src/llm/mod.rs:281-285`
 **Severity:** High
-**Impact:** Health check reported "model available" when the configured model tag didn't match any installed model. For example, config says `qwen3-coder:30b-a3b-instruct-q4_K_M` but only `qwen3-coder:latest` is installed. The prefix match `"qwen3-coder:"` matched both, so health check passed. But Ollama's chat API requires the exact model name, so all chat requests failed with 404.
+**Impact:** Health check reported "model available" when the configured model tag didn't match any installed model. For example, config says `qwen3-coder:30b-a3b-q4_K_M` but only `qwen3-coder:latest` is installed. The prefix match `"qwen3-coder:"` matched both, so health check passed. But Ollama's chat API requires the exact model name, so all chat requests failed with 404.
 
 **Root cause:** The prefix match logic checked if any installed model shared the same base name (before the colon), regardless of the tag portion.
 
