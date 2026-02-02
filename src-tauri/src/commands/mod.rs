@@ -119,7 +119,7 @@ fn to_response<E: Into<AppError>>(err: E) -> ErrorResponse {
 
 // ============ HEALTH & CONFIG ============
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn check_health(state: State<'_, AppState>) -> Result<HealthStatus, ErrorResponse> {
     let config = state
         .config
@@ -181,7 +181,7 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthStatus, Er
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_config(state: State<'_, AppState>) -> Result<AppConfig, ErrorResponse> {
     Ok(state
         .config
@@ -190,7 +190,7 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<AppConfig, ErrorRe
         .clone())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn update_search_config(
     state: State<'_, AppState>,
     search_config: SearchConfig,
@@ -207,7 +207,7 @@ pub async fn update_search_config(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn update_config(
     state: State<'_, AppState>,
     config: AppConfig,
@@ -226,7 +226,7 @@ pub async fn update_config(
 
 // ============ PREFERENCES ============
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_preference(
     state: State<'_, AppState>,
     key: String,
@@ -237,7 +237,7 @@ pub async fn get_preference(
         .map_err(to_response)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn set_preference(
     state: State<'_, AppState>,
     key: String,
@@ -251,7 +251,7 @@ pub async fn set_preference(
 
 // ============ MODELS ============
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn list_models(state: State<'_, AppState>) -> Result<Vec<String>, ErrorResponse> {
     let config = state
         .config
@@ -265,7 +265,7 @@ pub async fn list_models(state: State<'_, AppState>) -> Result<Vec<String>, Erro
         .map_err(to_response)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn pull_model(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -283,7 +283,7 @@ pub async fn pull_model(
         .map_err(to_response)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn cancel_pull_model(state: State<'_, AppState>) -> Result<(), ErrorResponse> {
     state.ollama.cancel_pull();
     Ok(())
@@ -295,7 +295,7 @@ pub struct DiskSpace {
     pub sufficient: bool,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn check_disk_space() -> Result<DiskSpace, ErrorResponse> {
     let result = tauri::async_runtime::spawn_blocking(|| -> Result<DiskSpace, AppError> {
         #[cfg(unix)]
@@ -359,7 +359,7 @@ pub async fn check_disk_space() -> Result<DiskSpace, ErrorResponse> {
 
 // ============ SESSIONS ============
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn create_session(
     state: State<'_, AppState>,
     request: CreateSessionRequest,
@@ -370,7 +370,7 @@ pub async fn create_session(
         .map_err(to_response)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_sessions(state: State<'_, AppState>) -> Result<Vec<Session>, ErrorResponse> {
     state
         .db
@@ -378,7 +378,7 @@ pub async fn get_sessions(state: State<'_, AppState>) -> Result<Vec<Session>, Er
         .map_err(to_response)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_session(
     state: State<'_, AppState>,
     session_id: String,
@@ -392,7 +392,7 @@ pub async fn get_session(
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn update_session(
     state: State<'_, AppState>,
     session_id: String,
@@ -411,7 +411,7 @@ pub async fn update_session(
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn delete_session(
     state: State<'_, AppState>,
     session_id: String,
@@ -419,7 +419,7 @@ pub async fn delete_session(
     state.db.delete_session(&session_id).map_err(to_response)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn delete_sessions(
     state: State<'_, AppState>,
     session_ids: Vec<String>,
@@ -429,7 +429,7 @@ pub async fn delete_sessions(
 
 // ============ MESSAGES ============
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_messages(
     state: State<'_, AppState>,
     session_id: String,
@@ -437,7 +437,7 @@ pub async fn get_messages(
     state.db.get_messages(&session_id).map_err(to_response)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn send_message(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -633,7 +633,7 @@ pub async fn send_message(
     Ok(user_msg)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn cancel_response(
     state: State<'_, AppState>,
     session_id: String,
@@ -648,7 +648,7 @@ pub async fn cancel_response(
 
 // ============ DOCUMENTS ============
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn generate_documents(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -659,7 +659,7 @@ pub async fn generate_documents(
         .map_err(to_response)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_documents(
     state: State<'_, AppState>,
     session_id: String,
@@ -667,7 +667,7 @@ pub async fn get_documents(
     state.db.get_documents(&session_id).map_err(to_response)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn check_documents_stale(
     state: State<'_, AppState>,
     session_id: String,
@@ -699,7 +699,7 @@ pub async fn check_documents_stale(
 
 // ============ EXPORT ============
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn save_to_folder(
     state: State<'_, AppState>,
     request: SaveToFolderRequest,
@@ -793,7 +793,7 @@ pub async fn save_to_folder(
 
 // ============ SEARCH ============
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn web_search(
     state: State<'_, AppState>,
     query: String,
