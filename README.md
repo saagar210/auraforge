@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  A desktop app that transforms project ideas into structured, implementation-ready planning documents through conversational AI — powered by local LLMs via Ollama, so your data never leaves your machine.
+  A desktop app that transforms project ideas into structured, implementation-ready planning documents through conversational AI — local-first with Ollama by default, with optional OpenAI and Anthropic provider support.
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
   <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/Rust-2021_Edition-DEA584?logo=rust&logoColor=white" alt="Rust" /></a>
   <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/TypeScript-Strict-3178C6?logo=typescript&logoColor=white" alt="TypeScript Strict" /></a>
   <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/Tailwind_CSS-4.0-38BDF8?logo=tailwindcss&logoColor=white" alt="Tailwind CSS 4" /></a>
-  <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/Tests-41_passing-brightgreen" alt="41 Tests Passing" /></a>
+  <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/Tests-Rust_%2B_Vitest-brightgreen" alt="Rust and Vitest tests" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License" /></a>
 </p>
 
@@ -79,20 +79,27 @@ Documents are generated sequentially with cross-referencing — each document re
 
 ## Feature Highlights
 
-### Conversational Planning with Streaming
-Natural dialogue powered by Ollama's local LLM inference. Responses stream token-by-token via NDJSON parsing with `requestAnimationFrame`-batched rendering to prevent excessive re-renders. Cancel mid-stream with an `AtomicBool` flag checked per chunk. Retry any response — the old assistant message is deleted from the database before streaming the replacement. v0.2.0 conversations go deeper — AuraForge limits itself to two questions per turn, finishes one topic before moving to the next, and pushes back on vague answers before allowing generation.
+### Conversational Planning with Multi-Provider LLM Support
+Natural dialogue powered by a provider-routed backend: **Ollama** (default local mode), plus **OpenAI** and **Anthropic** adapters when API keys are configured. Ollama responses stream token-by-token via NDJSON parsing with `requestAnimationFrame`-batched rendering to prevent excessive re-renders. Cancel mid-stream with an `AtomicBool` flag checked per chunk. Retry any response — the old assistant message is deleted from the database before streaming the replacement.
 
-### Grounded in Reality via Web Search
-Three search providers with automatic failover: **DuckDuckGo** (free, HTML scraping with multi-selector fallback), **Tavily** (API-based, higher quality), and **SearXNG** (self-hosted). Search triggers automatically when the conversation involves technical topics — detected by matching against 46 technology keywords and 25 trigger patterns. Results are injected as system context so the LLM can reference current versions, best practices, and real-world trade-offs.
+### Grounded in Reality via Web Search + Citations
+Three search providers with automatic failover: **DuckDuckGo** (free, HTML scraping with multi-selector fallback), **Tavily** (API-based, higher quality), and **SearXNG** (self-hosted). Search triggers automatically when the conversation involves technical topics. Results are injected as system context so the LLM can reference current versions, best practices, and real-world trade-offs. Assistant messages now surface source links and freshness timestamps.
 
-### Six-Document Generation with Cross-Referencing
-Sequential generation in dependency order: SPEC → CLAUDE → PROMPTS → README → START_HERE. Each document receives all previously generated documents as context, enabling cross-referencing (e.g., PROMPTS.md references exact conventions from CLAUDE.md, START_HERE.md generates setup steps matching the actual tech stack). Documents use `[TBD — not discussed during planning]` markers for undiscussed topics instead of inventing content. Output validation retries once if a document doesn't start with a proper heading (`#`). Documents are stored atomically — old versions are deleted and new ones inserted in a single database transaction. Staleness detection compares the latest message timestamp against document generation time.
+### Six-Document Generation with Version History and Diff
+Sequential generation in dependency order: SPEC → CLAUDE → PROMPTS → README → START_HERE. Each document receives all previously generated documents as context, enabling cross-referencing. Documents use `[TBD — not discussed during planning]` markers for undiscussed topics instead of inventing content. Output validation retries once if a document doesn't start with a proper heading (`#`). AuraForge now stores document versions, supports single-document regeneration, and shows previous-vs-current diff views in the document preview.
 
-### Planning Readiness Tracking
-When you trigger document generation, AuraForge assesses conversation coverage across key planning topics: problem statement, user flow, tech stack, data model, and scope boundaries. If gaps exist, it reports them and offers to fill them or proceed with `[TBD]` markers — advisory only, never blocks generation. This prevents shipping incomplete plans without the user realizing what's missing.
+### Planning Readiness Scorecard
+AuraForge assesses conversation coverage across key planning topics: problem statement, user flow, tech stack, data model, and scope boundaries, plus secondary checks like error handling and testing strategy. The Forge UI now shows a readiness scorecard before generation, including unresolved `[TBD]` count and a recommendation.
+
+### Planning Tools Workbench
+A new in-app **Planning Tools** panel provides:
+- Project templates (SaaS, API, CLI, AI Agent)
+- Repository context import (detected languages + key files)
+- Conversation branch creation for alternate decision paths
+- Issue export preview generation from planning docs
 
 ### Local-First and Private
-All data stays on your machine. Conversations live in a local SQLite database with WAL mode. Config is stored as YAML in `~/.auraforge/`. The only network calls are to your local Ollama instance and (optionally) web search providers. No telemetry, no cloud sync, no API keys required to get started.
+All data stays on your machine by default in local Ollama mode. Conversations live in a local SQLite database with WAL mode. Config is stored as YAML in `~/.auraforge/`. Network calls are only made to configured providers you opt into (Ollama/OpenAI/Anthropic + optional web search). No telemetry, no cloud sync, and no API keys required for local-first setup.
 
 ### Resilient Data Layer
 SQLite with WAL mode, foreign key cascades, and automatic schema migrations. Config writes are atomic (write to temp file, `fsync`, rename). If the config file corrupts, AuraForge backs it up and recreates valid defaults. If the database corrupts, it backs it up and falls back to an in-memory database so the app stays functional. Mutex poisoning is recovered via `unwrap_or_else(|e| e.into_inner())`.
@@ -112,10 +119,10 @@ A dark, atmospheric UI built around the metaphor of crafting. Ember particles dr
 │                   AuraForge Desktop App                     │
 ├───────────────────────┬────────────────────────────────────┤
 │    React Frontend     │          Rust Backend              │
-│    (21 components)    │          (8 modules)               │
+│  (chat + planning UI) │      (commands + services)         │
 │                       │                                    │
 │  ┌────────────────┐   │   ┌──────────────────────┐         │
-│  │  Zustand Store  │◄─IPC─►│   23 Tauri Commands   │         │
+│  │  Zustand Store  │◄─IPC─►│   Tauri Commands      │         │
 │  │  (single store) │   │   └──┬──────┬──────┬────┘         │
 │  └───────┬────────┘   │      │      │      │              │
 │          │            │      ▼      ▼      ▼              │
@@ -126,17 +133,18 @@ A dark, atmospheric UI built around the metaphor of crafting. Ember particles dr
 │  │  - DocPreview   │   │             │      │              │
 │  │  - Onboarding   │   │             ▼      ▼              │
 │  │  - Settings     │   │        ┌───────┐┌──────────────┐  │
-│  │  - ForgeButton  │   │        │Ollama ││DuckDuckGo    │  │
-│  └────────────────┘   │        │(local)││Tavily / Searx│  │
+│  │  - PlanningOps  │   │        │Ollama ││DuckDuckGo    │  │
+│  └────────────────┘   │        │OpenAI ││Tavily / SearX│  │
+│                       │        │Anthropic││NG            │  │
 │                       │        └───────┘└──────────────┘  │
 └───────────────────────┴────────────────────────────────────┘
 ```
 
-**Data flow:** User message → saved to SQLite → trigger detection scans for search-worthy content → (optional) web search results injected as system context → message + context sent to Ollama → NDJSON stream parsed chunk-by-chunk → chunks batched via `requestAnimationFrame` → assistant response saved to SQLite → frontend re-renders.
+**Data flow:** User message → saved to SQLite → trigger detection scans for search-worthy content → (optional) web search results injected as system context → provider-routed LLM request (Ollama/OpenAI/Anthropic) → streamed or chunked UI updates → assistant response saved to SQLite with search metadata → frontend re-renders.
 
-**IPC:** All 23 commands use Tauri's type-safe command system. Streaming responses use Tauri event emitters filtered by `session_id` to prevent cross-session contamination. A session-switch guard (`AtomicBool` per request) prevents stale responses from overwriting current state.
+**IPC:** Commands use Tauri's type-safe command system. Streaming responses use Tauri event emitters filtered by `session_id` to prevent cross-session contamination. A session-switch guard (`AtomicBool` per request) prevents stale responses from overwriting current state.
 
-**Security:** Content Security Policy restricts connections to `localhost` and configured search endpoints. Tauri capabilities are minimal — only `core`, `dialog`, and `opener` plugins are enabled. Link rendering in chat is restricted to `https:` and `mailto:` schemes.
+**Security:** Content Security Policy restricts connections to trusted endpoints (`localhost`, configured search providers, and HTTPS APIs). Tauri capabilities are minimal — only `core`, `dialog`, and `opener` plugins are enabled. Link rendering in chat is restricted to `https:` and `mailto:` schemes.
 
 ---
 
@@ -148,7 +156,7 @@ A dark, atmospheric UI built around the metaphor of crafting. Ember particles dr
 | **Frontend** | [React 19](https://react.dev) | Component-driven UI with streaming state management |
 | **State** | [Zustand 5](https://zustand.docs.pmnd.rs) | Single-store architecture, no provider wrapping |
 | **Backend** | [Rust 2021](https://www.rust-lang.org) | Memory-safe backend with async Tokio runtime |
-| **LLM** | [Ollama](https://ollama.com) | Local inference, NDJSON streaming, any GGUF model |
+| **LLM** | Ollama + OpenAI + Anthropic | Provider-routed chat/doc generation (Ollama local-first; cloud providers optional via API keys) |
 | **Database** | [SQLite](https://sqlite.org) via rusqlite | WAL mode, foreign key cascades, schema migrations |
 | **Search** | DuckDuckGo + [Tavily](https://tavily.com) + [SearXNG](https://docs.searxng.org) | Three providers with automatic failover |
 | **Styling** | [Tailwind CSS 4](https://tailwindcss.com) | Utility-first with `@theme` design tokens |
@@ -172,9 +180,10 @@ See [`distribution/INSTALL.md`](distribution/INSTALL.md) for detailed instructio
 
 **Prerequisites:**
 - **macOS** with Apple Silicon (Intel works too, just slower inference)
-- **Ollama** installed and running ([ollama.com](https://ollama.com))
+- **Ollama** installed and running for local-first mode ([ollama.com](https://ollama.com))
 - **Node.js** 18+ and **Rust** 1.75+
 - _Optional:_ [Tavily API key](https://tavily.com) for higher-quality web search
+- _Optional:_ `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` for cloud providers
 
 ```bash
 # Install Ollama and pull the default model
@@ -190,9 +199,9 @@ npm run tauri dev
 
 ### First Run
 
-AuraForge checks for Ollama connectivity and model availability on startup. If anything is missing, a setup wizard walks you through installation and model download. Once set up, describe what you want to build and AuraForge takes it from there.
+AuraForge defaults to Ollama and checks local connectivity/model availability on startup. If anything is missing, a setup wizard walks you through installation and model download. Once set up, describe what you want to build and AuraForge takes it from there.
 
-Health is re-checked every 60 seconds. If Ollama disconnects mid-session, a toast notification alerts you immediately.
+If you prefer cloud providers, set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, then switch provider in Settings.
 
 ### Production Build
 
@@ -222,23 +231,20 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 
 ---
 
-## Quality Metrics
+## Quality Gates
 
-| Metric | Result |
-|--------|--------|
-| `cargo test` | **41/41 passing** |
-| `cargo clippy -- -D warnings` | **0 warnings** |
-| `npx tsc --noEmit` | **0 errors** |
-| `npm run tauri build` | **Produces .app + .dmg** |
-| Source lines | **~8,825** across Rust, TypeScript, and CSS |
-| Rust test coverage | Config parsing, DB operations, search trigger detection (18 cases), URL extraction, model matching, message deletion |
+Core validation commands:
 
-### What's Tested
+- `npm run typecheck`
+- `npm test` (Vitest + Testing Library frontend tests)
+- `cd src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test`
+- `npm run tauri build`
 
-- **Search trigger detection:** 18 unit tests covering technology keywords, question patterns, comparison queries, version lookups, and negative cases
-- **Database operations:** Session CRUD, message cascade deletion, document atomic replacement, assistant message deletion on retry
-- **Config handling:** YAML round-trip, default generation, corruption recovery
-- **URL extraction:** DuckDuckGo redirect URL parsing (`uddg=` parameter extraction)
+### What's Covered
+
+- **Backend tests:** config parsing/recovery, DB session + message + document flows, search trigger detection, URL extraction.
+- **Frontend tests (scaffolded):** component-level checks for planning readiness UI and document diff logic.
+- **Runtime safety checks:** type-safe IPC commands, staleness detection, document version history, and folder export guardrails.
 
 ---
 
@@ -266,20 +272,21 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 
 **v0.2.0** — Document quality overhaul: advisory readiness system, deeper conversations (topic-at-a-time, pushback on vague answers), reality-grounded generation (real code not pseudocode, tech-stack-consistent commands), cross-referenced documents, hallucination guardrails with `[TBD]` markers, START_HERE.md as 6th document.
 
+**v0.3.0 (current)** — Planning tools panel (templates, repo import context, branch creation, issue export preview), multi-provider LLM routing (Ollama/OpenAI/Anthropic), source citations + freshness in chat, document version history with single-document regenerate and diff view, frontend Vitest test harness scaffolding.
+
 ### Next
 
-- [ ] Confidence scoring — post-generation assessment of document completeness
-- [ ] Planning coverage UI — sidebar indicator tracking topic coverage during conversation
-- [ ] Audit report fixes — structured error handling (`AppError`), transaction safety, CSP hardening (see AUDIT_REPORT.md)
+- [ ] Full provider streaming support for OpenAI/Anthropic paths
+- [ ] One-click issue export publishing (GitHub/Linear APIs, not just preview)
+- [ ] Branch compare/merge workflow in UI
+- [ ] CSP hardening and additional security tightening (see AUDIT_REPORT.md)
 
 ### Future
 
 - [ ] Windows and Linux builds
-- [ ] Multiple LLM providers (Anthropic API, OpenAI) alongside Ollama
-- [ ] Project templates for common app types
-- [ ] Import existing codebases for refactoring plans
-- [ ] Export to GitHub Issues / Linear integration
-- [ ] Conversation branching — explore alternate decisions without losing the main thread
+- [ ] Team collaboration and shared planning sessions
+- [ ] Template marketplace / custom template packs
+- [ ] Automated quality scoring tuned by project type
 
 ---
 
