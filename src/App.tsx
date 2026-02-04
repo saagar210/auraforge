@@ -22,6 +22,8 @@ import { InfoTooltip } from "./components/InfoTooltip";
 import { Toast } from "./components/Toast";
 import { EmberParticles } from "./components/EmberParticles";
 import { ThermalBackground } from "./components/ThermalBackground";
+import { PlanningReadinessCard } from "./components/PlanningReadinessCard";
+import { PlanningOpsPanel } from "./components/PlanningOpsPanel";
 import { useChatStore } from "./stores/chatStore";
 import type { HealthStatus } from "./types";
 import { friendlyError } from "./utils/errorMessages";
@@ -55,12 +57,15 @@ function App() {
     isFirstSession,
     showSettings,
     showHelp,
+    showPlanningOps,
     config,
+    planningReadiness,
     checkHealth,
     loadPreferences,
     loadConfig,
     setShowSettings,
     setShowHelp,
+    setShowPlanningOps,
     loadSessions,
     createSession,
     sendMessage,
@@ -68,6 +73,8 @@ function App() {
     clearStreamError,
     retryLastMessage,
     generateDocuments,
+    regenerateDocument,
+    getDocumentVersions,
     setShowPreview,
     saveToFolder,
     openFolder,
@@ -235,6 +242,8 @@ function App() {
       if (e.key === "Escape") {
         if (showSettings) {
           setShowSettings(false);
+        } else if (showPlanningOps) {
+          setShowPlanningOps(false);
         } else if (showHelp) {
           setShowHelp(false);
         } else if (showOnboarding) {
@@ -295,6 +304,7 @@ function App() {
     showPreview,
     showOnboarding,
     showHelp,
+    showPlanningOps,
   ]);
 
   // Auto-scroll to bottom
@@ -387,6 +397,8 @@ function App() {
                 documents={documents}
                 stale={documentsStale}
                 onRegenerate={generateDocuments}
+                onRegenerateDocument={regenerateDocument}
+                getDocumentVersions={getDocumentVersions}
                 regenerating={isCurrentSessionGenerating}
                 onSave={handleSaveToFolder}
               />
@@ -450,13 +462,16 @@ function App() {
 
                         {/* Forge the Plan button */}
                         {canForge && (
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-col gap-2">
+                            <PlanningReadinessCard readiness={planningReadiness} />
+                            <div className="flex items-center gap-2">
                             <ForgeButton
                               onClick={generateDocuments}
                               disabled={!canForge}
                               generating={isCurrentSessionGenerating}
                             />
                             <InfoTooltip text="Generates 5 planning documents from your conversation" />
+                            </div>
                           </div>
                         )}
                       </>
@@ -538,6 +553,16 @@ function App() {
 
       {/* Help Panel */}
       <HelpPanel open={showHelp} onClose={() => setShowHelp(false)} />
+
+      {/* Planning Tools */}
+      <PlanningOpsPanel
+        open={showPlanningOps}
+        onClose={() => setShowPlanningOps(false)}
+        onApplyTemplate={(template) => {
+          setInputValue(template.prompt_seed);
+          setShowPlanningOps(false);
+        }}
+      />
 
       {/* Settings Panel */}
       <SettingsPanel

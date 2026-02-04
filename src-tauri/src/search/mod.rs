@@ -3,11 +3,11 @@ mod searxng;
 mod tavily;
 mod trigger;
 
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use std::time::Duration;
+use thiserror::Error;
 
 use crate::types::SearchConfig;
 

@@ -1,4 +1,7 @@
 use serde::Serialize;
+use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::{Emitter, State};
@@ -127,7 +130,7 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthStatus, Er
         .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
         .clone();
 
-    let (ollama_connected, ollama_model_available) = state.ollama.health_check(&config).await;
+    let (provider_connected, model_available) = state.ollama.health_check(&config).await;
 
     let config_error = state
         .config_error
@@ -144,22 +147,35 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthStatus, Er
 
     let mut errors = Vec::new();
 
-    if !ollama_connected {
-        errors.push(format!(
-            "Cannot connect to Ollama at {}. Is it running?",
-            config.llm.base_url
-        ));
-    } else if !ollama_model_available {
-        errors.push(format!(
-            "Model '{}' not found. Run: ollama pull {}",
-            config.llm.model,
-            config
-                .llm
-                .model
-                .split(':')
-                .next()
-                .unwrap_or(&config.llm.model)
-        ));
+    if !provider_connected {
+        let msg = match config.llm.provider.as_str() {
+            "ollama" => format!(
+                "Cannot connect to Ollama at {}. Is it running?",
+                config.llm.base_url
+            ),
+            "openai" => "Cannot reach OpenAI or OPENAI_API_KEY is missing.".to_string(),
+            "anthropic" => "Cannot reach Anthropic or ANTHROPIC_API_KEY is missing.".to_string(),
+            _ => format!("Unsupported provider '{}'.", config.llm.provider),
+        };
+        errors.push(msg);
+    } else if !model_available {
+        if config.llm.provider == "ollama" {
+            errors.push(format!(
+                "Model '{}' not found. Run: ollama pull {}",
+                config.llm.model,
+                config
+                    .llm
+                    .model
+                    .split(':')
+                    .next()
+                    .unwrap_or(&config.llm.model)
+            ));
+        } else {
+            errors.push(format!(
+                "Model '{}' is unavailable for {}.",
+                config.llm.model, config.llm.provider
+            ));
+        }
     }
 
     if !database_ok || db_error.is_some() {
@@ -173,8 +189,8 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthStatus, Er
     }
 
     Ok(HealthStatus {
-        ollama_connected,
-        ollama_model_available,
+        ollama_connected: provider_connected,
+        ollama_model_available: model_available,
         database_ok,
         config_valid,
         errors,
@@ -188,6 +204,31 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<AppConfig, ErrorRe
         .lock()
         .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
         .clone())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_provider_capabilities(
+    state: State<'_, AppState>,
+) -> Result<ProviderCapabilities, ErrorResponse> {
+    let providers = ["ollama", "openai", "anthropic"]
+        .iter()
+        .map(|provider| match state.ollama.provider_supported(provider) {
+            Ok(()) => ProviderCapability {
+                key: (*provider).to_string(),
+                supported: true,
+                reason: None,
+            },
+            Err(err) => ProviderCapability {
+                key: (*provider).to_string(),
+                supported: false,
+                reason: Some(err.to_string()),
+            },
+        })
+        .collect();
+    Ok(ProviderCapabilities {
+        providers,
+        default_provider: "ollama".to_string(),
+    })
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -231,10 +272,7 @@ pub async fn get_preference(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<Option<String>, ErrorResponse> {
-    state
-        .db
-        .get_preference(&key)
-        .map_err(to_response)
+    state.db.get_preference(&key).map_err(to_response)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -243,10 +281,7 @@ pub async fn set_preference(
     key: String,
     value: String,
 ) -> Result<(), ErrorResponse> {
-    state
-        .db
-        .set_preference(&key, &value)
-        .map_err(to_response)
+    state.db.set_preference(&key, &value).map_err(to_response)
 }
 
 // ============ MODELS ============
@@ -258,11 +293,15 @@ pub async fn list_models(state: State<'_, AppState>) -> Result<Vec<String>, Erro
         .lock()
         .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
         .clone();
-    state
+    let mut models = state
         .ollama
-        .list_models(&config.llm.base_url)
+        .list_models_for_provider(&config.llm.provider, &config.llm.base_url)
         .await
-        .map_err(to_response)
+        .map_err(to_response)?;
+    if models.is_empty() {
+        models.push(config.llm.model.clone());
+    }
+    Ok(models)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -276,6 +315,11 @@ pub async fn pull_model(
         .lock()
         .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
         .clone();
+    if config.llm.provider != "ollama" {
+        return Err(to_response(AppError::Config(
+            "Model pull is only supported for Ollama provider".to_string(),
+        )));
+    }
     state
         .ollama
         .pull_model(&app, &config.llm.base_url, &model_name)
@@ -319,20 +363,23 @@ pub async fn check_disk_space() -> Result<DiskSpace, ErrorResponse> {
         }
 
         // Fallback: try `df` command (works on macOS/Linux, fails gracefully elsewhere)
-        let output = std::process::Command::new("df")
-            .args(["-k", "/"])
-            .output();
+        let output = std::process::Command::new("df").args(["-k", "/"]).output();
 
         let available_gb = match output {
             Ok(out) => {
                 let stdout = String::from_utf8_lossy(&out.stdout);
-                let available_kb: u64 = stdout
+                let available_kb = stdout
                     .lines()
                     .nth(1)
                     .and_then(|line| line.split_whitespace().nth(3))
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
-                available_kb as f64 / 1_048_576.0
+                    .and_then(|s| s.parse::<u64>().ok());
+                match available_kb {
+                    Some(kb) => kb as f64 / 1_048_576.0,
+                    None => {
+                        log::warn!("Unable to parse df output; assuming sufficient space");
+                        100.0
+                    }
+                }
             }
             Err(_) => {
                 // Cannot determine disk space (e.g., Windows without df)
@@ -372,10 +419,7 @@ pub async fn create_session(
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn get_sessions(state: State<'_, AppState>) -> Result<Vec<Session>, ErrorResponse> {
-    state
-        .db
-        .get_sessions()
-        .map_err(to_response)
+    state.db.get_sessions().map_err(to_response)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -427,6 +471,29 @@ pub async fn delete_sessions(
     state.db.delete_sessions(&session_ids).map_err(to_response)
 }
 
+#[tauri::command(rename_all = "snake_case")]
+pub async fn create_branch(
+    state: State<'_, AppState>,
+    request: CreateBranchRequest,
+) -> Result<ConversationBranch, ErrorResponse> {
+    state
+        .db
+        .create_branch(
+            &request.session_id,
+            &request.name,
+            request.base_message_id.as_deref(),
+        )
+        .map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn list_branches(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<ConversationBranch>, ErrorResponse> {
+    state.db.list_branches(&session_id).map_err(to_response)
+}
+
 // ============ MESSAGES ============
 
 #[tauri::command(rename_all = "snake_case")]
@@ -450,15 +517,16 @@ pub async fn send_message(
     // Save user message (skip on retry — message already exists in DB)
     let user_msg = if is_retry {
         // Find the last user message from DB
-        let messages = state
-            .db
-            .get_messages(&session_id)
-            .map_err(to_response)?;
+        let messages = state.db.get_messages(&session_id).map_err(to_response)?;
         let last_user = messages
             .into_iter()
             .rev()
             .find(|m| m.role == "user")
-            .ok_or_else(|| to_response(AppError::Unknown("No user message found to retry".to_string())))?;
+            .ok_or_else(|| {
+                to_response(AppError::Unknown(
+                    "No user message found to retry".to_string(),
+                ))
+            })?;
         // Remove the old assistant response to avoid duplicates
         if let Err(e) = state.db.delete_last_assistant_message(&session_id) {
             log::warn!("Failed to delete old assistant message on retry: {}", e);
@@ -533,10 +601,7 @@ pub async fn send_message(
     }
 
     // Build conversation history for LLM
-    let db_messages = state
-        .db
-        .get_messages(&session_id)
-        .map_err(to_response)?;
+    let db_messages = state.db.get_messages(&session_id).map_err(to_response)?;
 
     let mut chat_messages = vec![ChatMessage {
         role: "system".to_string(),
@@ -571,6 +636,7 @@ pub async fn send_message(
         .ollama
         .stream_chat(
             &app,
+            &config.llm.provider,
             &config.llm.base_url,
             &config.llm.model,
             chat_messages,
@@ -588,6 +654,7 @@ pub async fn send_message(
                 let meta = serde_json::json!({
                     "search_query": search_query,
                     "search_results": search_results,
+                    "search_timestamp": chrono::Utc::now().to_rfc3339(),
                 });
                 Some(meta.to_string())
             } else {
@@ -660,11 +727,167 @@ pub async fn generate_documents(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn regenerate_document(
+    state: State<'_, AppState>,
+    request: RegenerateDocumentRequest,
+) -> Result<GeneratedDocument, ErrorResponse> {
+    crate::docgen::regenerate_single_document(&state, &request.session_id, &request.filename)
+        .await
+        .map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_documents(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<Vec<GeneratedDocument>, ErrorResponse> {
     state.db.get_documents(&session_id).map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_document_versions(
+    state: State<'_, AppState>,
+    session_id: String,
+    filename: String,
+    limit: Option<usize>,
+) -> Result<Vec<DocumentVersion>, ErrorResponse> {
+    state
+        .db
+        .get_document_versions(&session_id, &filename, limit.unwrap_or(10))
+        .map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn assess_planning_readiness(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<PlanningReadiness, ErrorResponse> {
+    let messages = state.db.get_messages(&session_id).map_err(to_response)?;
+    let docs = state.db.get_documents(&session_id).map_err(to_response)?;
+
+    let mut corpus = String::new();
+    for msg in &messages {
+        if msg.role != "system" {
+            corpus.push_str(&msg.content.to_lowercase());
+            corpus.push('\n');
+        }
+    }
+
+    let must_have_topics = vec![
+        (
+            "problem",
+            "Problem statement",
+            vec!["problem", "pain", "why", "goal", "outcome"],
+        ),
+        (
+            "flow",
+            "Core user flow",
+            vec!["flow", "steps", "user journey", "first", "then"],
+        ),
+        (
+            "stack",
+            "Tech stack",
+            vec!["react", "rust", "tauri", "database", "stack", "framework"],
+        ),
+        (
+            "data",
+            "Data model",
+            vec!["schema", "table", "entity", "model", "store", "persist"],
+        ),
+        (
+            "scope",
+            "Scope boundaries",
+            vec!["out of scope", "not include", "v1", "defer", "later"],
+        ),
+    ];
+
+    let should_have_topics = vec![
+        (
+            "errors",
+            "Error handling",
+            vec!["error", "retry", "failure", "fallback"],
+        ),
+        (
+            "tradeoffs",
+            "Trade-offs",
+            vec!["trade-off", "tradeoff", "pros", "cons", "decision"],
+        ),
+        (
+            "testing",
+            "Testing strategy",
+            vec!["test", "integration", "unit", "verification"],
+        ),
+        (
+            "security",
+            "Security",
+            vec!["security", "auth", "permission", "privacy"],
+        ),
+        (
+            "performance",
+            "Performance",
+            vec!["latency", "performance", "speed", "throughput", "memory"],
+        ),
+    ];
+
+    let evaluate = |topics: Vec<(&str, &str, Vec<&str>)>| -> Vec<CoverageItem> {
+        topics
+            .into_iter()
+            .map(|(key, label, keywords)| {
+                let hit_count = keywords.iter().filter(|k| corpus.contains(**k)).count();
+                let status = if hit_count >= 2 {
+                    "covered"
+                } else if hit_count == 1 {
+                    "partial"
+                } else {
+                    "missing"
+                };
+                CoverageItem {
+                    key: key.to_string(),
+                    label: label.to_string(),
+                    status: status.to_string(),
+                }
+            })
+            .collect()
+    };
+
+    let must_haves = evaluate(must_have_topics);
+    let should_haves = evaluate(should_have_topics);
+    let unresolved_tbd = docs
+        .iter()
+        .map(|d| d.content.matches("[TBD").count())
+        .sum::<usize>();
+
+    let score_points = must_haves.iter().fold(0u32, |acc, item| {
+        acc + match item.status.as_str() {
+            "covered" => 20,
+            "partial" => 10,
+            _ => 0,
+        }
+    }) + should_haves.iter().fold(0u32, |acc, item| {
+        acc + match item.status.as_str() {
+            "covered" => 6,
+            "partial" => 3,
+            _ => 0,
+        }
+    });
+    let score = (score_points.min(100)) as u8;
+
+    let missing_must = must_haves.iter().filter(|i| i.status == "missing").count();
+    let recommendation = if missing_must > 0 {
+        "Consider filling the missing must-have topics before forging.".to_string()
+    } else if unresolved_tbd > 0 {
+        "Plan is mostly ready; review unresolved [TBD] items before export.".to_string()
+    } else {
+        "Planning coverage looks strong.".to_string()
+    };
+
+    Ok(PlanningReadiness {
+        score,
+        must_haves,
+        should_haves,
+        unresolved_tbd,
+        recommendation,
+    })
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -791,6 +1014,169 @@ pub async fn save_to_folder(
     Ok(output_path)
 }
 
+#[tauri::command(rename_all = "snake_case")]
+pub async fn list_plan_templates() -> Result<Vec<PlanTemplate>, ErrorResponse> {
+    Ok(vec![
+        PlanTemplate {
+            id: "saas".to_string(),
+            name: "SaaS Web App".to_string(),
+            description: "Multi-tenant product with auth, billing, and usage tracking".to_string(),
+            tags: vec!["web".to_string(), "saas".to_string(), "product".to_string()],
+            prompt_seed: "Plan a SaaS app with user onboarding, core workflows, billing hooks, and analytics.".to_string(),
+        },
+        PlanTemplate {
+            id: "api".to_string(),
+            name: "Backend API".to_string(),
+            description: "Service-first architecture with contracts, observability, and deployment".to_string(),
+            tags: vec!["backend".to_string(), "api".to_string(), "service".to_string()],
+            prompt_seed: "Plan an API-first backend with endpoint contracts, data model, tests, and rollout strategy.".to_string(),
+        },
+        PlanTemplate {
+            id: "cli".to_string(),
+            name: "Developer CLI".to_string(),
+            description: "Command-line tool with subcommands, config, and plugin/extensibility thinking".to_string(),
+            tags: vec!["cli".to_string(), "developer-tools".to_string()],
+            prompt_seed: "Plan a CLI with clear subcommands, config defaults, error messages, and integration tests.".to_string(),
+        },
+        PlanTemplate {
+            id: "agent".to_string(),
+            name: "AI Agent App".to_string(),
+            description: "Tool-using assistant with safety gates, memory model, and evaluation plan".to_string(),
+            tags: vec!["ai".to_string(), "agent".to_string()],
+            prompt_seed: "Plan an AI agent app with tool interfaces, prompt strategy, quality checks, and guardrails.".to_string(),
+        },
+    ])
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn import_repository_context(
+    request: RepoImportRequest,
+) -> Result<RepoImportContext, ErrorResponse> {
+    let root = PathBuf::from(&request.path);
+    if !root.exists() || !root.is_dir() {
+        return Err(to_response(AppError::FileSystem {
+            path: request.path,
+            message: "Repository path does not exist or is not a directory".to_string(),
+        }));
+    }
+
+    let max_files = request.max_files.unwrap_or(400);
+    let mut stack = vec![root.clone()];
+    let mut scanned = 0usize;
+    let mut key_files = Vec::new();
+    let mut languages = HashSet::new();
+
+    while let Some(dir) = stack.pop() {
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            to_response(AppError::FileSystem {
+                path: dir.to_string_lossy().to_string(),
+                message: e.to_string(),
+            })
+        })?;
+        for entry in entries.flatten() {
+            if scanned >= max_files {
+                break;
+            }
+            let path = entry.path();
+            let file_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            if file_name.starts_with('.') && file_name != ".env.example" {
+                continue;
+            }
+            if path.is_dir() {
+                if file_name == "node_modules" || file_name == "target" || file_name == "dist" {
+                    continue;
+                }
+                stack.push(path);
+                continue;
+            }
+            scanned += 1;
+
+            if is_key_project_file(&path) {
+                key_files.push(path.to_string_lossy().to_string());
+            }
+            if let Some(lang) = detect_language(&path) {
+                languages.insert(lang.to_string());
+            }
+        }
+        if scanned >= max_files {
+            break;
+        }
+    }
+
+    key_files.sort();
+    let mut detected_languages = languages.into_iter().collect::<Vec<_>>();
+    detected_languages.sort();
+
+    Ok(RepoImportContext {
+        root: root.to_string_lossy().to_string(),
+        detected_languages: detected_languages.clone(),
+        key_files: key_files.iter().take(25).cloned().collect(),
+        summary: format!(
+            "Scanned {} files. Detected languages: {}. Found {} key config/docs files.",
+            scanned,
+            if detected_languages.is_empty() {
+                "unknown".to_string()
+            } else {
+                detected_languages.join(", ")
+            },
+            key_files.len()
+        ),
+    })
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn build_issue_export_preview(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<BacklogItem>, ErrorResponse> {
+    let docs = state.db.get_documents(&session_id).map_err(to_response)?;
+    let prompts_doc = docs.iter().find(|d| d.filename == "PROMPTS.md");
+    let spec_doc = docs.iter().find(|d| d.filename == "SPEC.md");
+
+    let mut items = Vec::new();
+    if let Some(prompts) = prompts_doc {
+        for line in prompts
+            .content
+            .lines()
+            .filter(|l| l.starts_with("## Phase "))
+        {
+            let title = line.trim_start_matches('#').trim().to_string();
+            items.push(BacklogItem {
+                title,
+                body: "Generated from PROMPTS.md phase heading. Expand acceptance criteria before publishing to GitHub/Linear.".to_string(),
+                labels: vec!["planning".to_string(), "phase".to_string()],
+            });
+        }
+    }
+
+    if items.is_empty() {
+        items.push(BacklogItem {
+            title: "Project kickoff".to_string(),
+            body: "No phase headings found in PROMPTS.md yet. Generate documents first, then re-run export preview.".to_string(),
+            labels: vec!["planning".to_string()],
+        });
+    }
+
+    if let Some(spec) = spec_doc {
+        let tbd_count = spec.content.matches("[TBD").count();
+        if tbd_count > 0 {
+            items.push(BacklogItem {
+                title: "Resolve planning TBDs".to_string(),
+                body: format!(
+                    "SPEC.md currently has {} unresolved [TBD] markers. Resolve these before implementation starts.",
+                    tbd_count
+                ),
+                labels: vec!["planning".to_string(), "risk".to_string()],
+            });
+        }
+    }
+
+    Ok(items)
+}
+
 // ============ SEARCH ============
 
 #[tauri::command(rename_all = "snake_case")]
@@ -803,14 +1189,49 @@ pub async fn web_search(
         .lock()
         .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
         .clone();
-    let mut search_config = config.search.clone();
-    search_config.enabled = true;
-    if search_config.provider == "none" {
-        search_config.provider = "duckduckgo".to_string();
+    if !config.search.enabled || config.search.provider == "none" {
+        return Ok(vec![]);
     }
-    search::execute_search(&search_config, &query)
+    search::execute_search(&config.search, &query)
         .await
         .map_err(to_response)
+}
+
+fn is_key_project_file(path: &Path) -> bool {
+    matches!(
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default(),
+        "package.json"
+            | "package-lock.json"
+            | "pnpm-lock.yaml"
+            | "Cargo.toml"
+            | "go.mod"
+            | "pyproject.toml"
+            | "requirements.txt"
+            | "README.md"
+            | "SPEC.md"
+            | "CLAUDE.md"
+            | "PROMPTS.md"
+            | "tauri.conf.json"
+    )
+}
+
+fn detect_language(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+    {
+        "ts" | "tsx" | "js" | "jsx" => Some("TypeScript/JavaScript"),
+        "rs" => Some("Rust"),
+        "py" => Some("Python"),
+        "go" => Some("Go"),
+        "java" => Some("Java"),
+        "kt" => Some("Kotlin"),
+        "swift" => Some("Swift"),
+        _ => None,
+    }
 }
 
 fn sanitize_folder_name(name: &str) -> String {

@@ -5,6 +5,7 @@ import {
   MessageSquare,
   Settings,
   HelpCircle,
+  Sparkles,
   CheckSquare,
   Square,
   XCircle,
@@ -23,6 +24,7 @@ export function Sidebar() {
     renameSession,
     setShowSettings,
     setShowHelp,
+    setShowPlanningOps,
     sidebarCollapsed,
   } = useChatStore();
 
@@ -340,6 +342,14 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="px-4 py-3 border-t border-border-subtle flex items-center gap-3">
+        <button
+          onClick={() => setShowPlanningOps(true)}
+          aria-label="Open planning tools"
+          className="flex items-center gap-2 text-text-secondary text-xs hover:text-text-primary transition-colors duration-200 cursor-pointer bg-transparent border-none"
+        >
+          <Sparkles className="w-4 h-4" aria-hidden="true" />
+          <span>Tools</span>
+        </button>
         <button
           onClick={() => setShowSettings(true)}
           aria-label="Open settings"

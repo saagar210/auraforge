@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -16,7 +17,7 @@ pub struct Message {
     pub session_id: String,
     pub role: String,
     pub content: String,
-    pub metadata: Option<String>,
+    pub metadata: Option<Value>,
     pub created_at: String,
 }
 
@@ -93,9 +94,100 @@ pub struct GenerateDocumentsRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegenerateDocumentRequest {
+    pub session_id: String,
+    pub filename: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveToFolderRequest {
     pub session_id: String,
     pub folder_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentVersion {
+    pub id: String,
+    pub session_id: String,
+    pub filename: String,
+    pub version: i64,
+    pub content: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderCapability {
+    pub key: String,
+    pub supported: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderCapabilities {
+    pub providers: Vec<ProviderCapability>,
+    pub default_provider: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoverageItem {
+    pub key: String,
+    pub label: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanningReadiness {
+    pub score: u8,
+    pub must_haves: Vec<CoverageItem>,
+    pub should_haves: Vec<CoverageItem>,
+    pub unresolved_tbd: usize,
+    pub recommendation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationBranch {
+    pub id: String,
+    pub session_id: String,
+    pub name: String,
+    pub base_message_id: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateBranchRequest {
+    pub session_id: String,
+    pub name: String,
+    pub base_message_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanTemplate {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub prompt_seed: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoImportRequest {
+    pub path: String,
+    pub max_files: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoImportContext {
+    pub root: String,
+    pub detected_languages: Vec<String>,
+    pub key_files: Vec<String>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BacklogItem {
+    pub title: String,
+    pub body: String,
+    pub labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

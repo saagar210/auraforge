@@ -1,4 +1,5 @@
 use rusqlite::{params, Connection};
+use serde_json::Value;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -6,6 +7,10 @@ use crate::types::*;
 
 pub struct Database {
     conn: Mutex<Connection>,
+}
+
+fn parse_metadata(value: Option<String>) -> Option<Value> {
+    value.and_then(|raw| serde_json::from_str(&raw).ok())
 }
 
 impl Database {
@@ -64,6 +69,23 @@ impl Database {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS document_versions (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS conversation_branches (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                base_message_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
             CREATE TABLE IF NOT EXISTS preferences (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -74,6 +96,8 @@ impl Database {
             INSERT OR IGNORE INTO schema_migrations (version) VALUES (1);
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
             CREATE INDEX IF NOT EXISTS idx_documents_session ON documents(session_id);
+            CREATE INDEX IF NOT EXISTS idx_doc_versions_session_file ON document_versions(session_id, filename, version DESC);
+            CREATE INDEX IF NOT EXISTS idx_branches_session ON conversation_branches(session_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC);
             ",
         )?;
@@ -207,12 +231,13 @@ impl Database {
             "SELECT id, session_id, role, content, metadata, created_at FROM messages WHERE id = ?1",
             params![id],
             |row| {
+                let metadata: Option<String> = row.get(4)?;
                 Ok(Message {
                     id: row.get(0)?,
                     session_id: row.get(1)?,
                     role: row.get(2)?,
                     content: row.get(3)?,
-                    metadata: row.get(4)?,
+                    metadata: parse_metadata(metadata),
                     created_at: row.get(5)?,
                 })
             },
@@ -228,12 +253,13 @@ impl Database {
         )?;
 
         let rows = stmt.query_map(params![session_id], |row| {
+            let metadata: Option<String> = row.get(4)?;
             Ok(Message {
                 id: row.get(0)?,
                 session_id: row.get(1)?,
                 role: row.get(2)?,
                 content: row.get(3)?,
-                metadata: row.get(4)?,
+                metadata: parse_metadata(metadata),
                 created_at: row.get(5)?,
             })
         })?;
@@ -334,6 +360,7 @@ impl Database {
     ) -> Result<Vec<GeneratedDocument>, rusqlite::Error> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        Self::archive_current_documents(&tx, session_id)?;
         tx.execute(
             "DELETE FROM documents WHERE session_id = ?1",
             params![session_id],
@@ -366,6 +393,107 @@ impl Database {
         Ok(inserted)
     }
 
+    pub fn replace_document(
+        &self,
+        session_id: &str,
+        filename: &str,
+        content: &str,
+    ) -> Result<GeneratedDocument, rusqlite::Error> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+
+        // Store the previous current document as a historical version.
+        if let Some(previous) = Self::get_current_document_row(&tx, session_id, filename)? {
+            let next_version = Self::next_document_version(&tx, session_id, filename)?;
+            tx.execute(
+                "INSERT INTO document_versions (id, session_id, filename, version, content) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    session_id,
+                    filename,
+                    next_version,
+                    previous
+                ],
+            )?;
+            tx.execute(
+                "DELETE FROM documents WHERE session_id = ?1 AND filename = ?2",
+                params![session_id, filename],
+            )?;
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO documents (id, session_id, filename, content) VALUES (?1, ?2, ?3, ?4)",
+            params![id, session_id, filename, content],
+        )?;
+
+        let doc = tx.query_row(
+            "SELECT id, session_id, filename, content, created_at FROM documents WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(GeneratedDocument {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    filename: row.get(2)?,
+                    content: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            },
+        )?;
+        tx.commit()?;
+        Ok(doc)
+    }
+
+    #[allow(dead_code)]
+    pub fn get_document(
+        &self,
+        session_id: &str,
+        filename: &str,
+    ) -> Result<Option<GeneratedDocument>, rusqlite::Error> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, filename, content, created_at FROM documents WHERE session_id = ?1 AND filename = ?2",
+        )?;
+        let mut rows = stmt.query(params![session_id, filename])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(GeneratedDocument {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                filename: row.get(2)?,
+                content: row.get(3)?,
+                created_at: row.get(4)?,
+            }));
+        }
+        Ok(None)
+    }
+
+    pub fn get_document_versions(
+        &self,
+        session_id: &str,
+        filename: &str,
+        limit: usize,
+    ) -> Result<Vec<DocumentVersion>, rusqlite::Error> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, filename, version, content, created_at
+             FROM document_versions
+             WHERE session_id = ?1 AND filename = ?2
+             ORDER BY version DESC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![session_id, filename, limit as i64], |row| {
+            Ok(DocumentVersion {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                filename: row.get(2)?,
+                version: row.get(3)?,
+                content: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        rows.collect()
+    }
+
     pub fn latest_document_time(
         &self,
         session_id: &str,
@@ -385,6 +513,58 @@ impl Database {
             params![session_id],
             |row| row.get(0),
         )
+    }
+
+    // ---- Branches ----
+
+    pub fn create_branch(
+        &self,
+        session_id: &str,
+        name: &str,
+        base_message_id: Option<&str>,
+    ) -> Result<ConversationBranch, rusqlite::Error> {
+        let conn = self.conn();
+        let id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO conversation_branches (id, session_id, name, base_message_id) VALUES (?1, ?2, ?3, ?4)",
+            params![id, session_id, name, base_message_id],
+        )?;
+        conn.query_row(
+            "SELECT id, session_id, name, base_message_id, created_at FROM conversation_branches WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(ConversationBranch {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    name: row.get(2)?,
+                    base_message_id: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            },
+        )
+    }
+
+    pub fn list_branches(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<ConversationBranch>, rusqlite::Error> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, name, base_message_id, created_at
+             FROM conversation_branches
+             WHERE session_id = ?1
+             ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok(ConversationBranch {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                name: row.get(2)?,
+                base_message_id: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?;
+        rows.collect()
     }
 
     // ---- Preferences ----
@@ -413,6 +593,61 @@ impl Database {
 
     fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn archive_current_documents(
+        tx: &rusqlite::Transaction<'_>,
+        session_id: &str,
+    ) -> Result<(), rusqlite::Error> {
+        let mut stmt =
+            tx.prepare("SELECT filename, content FROM documents WHERE session_id = ?1")?;
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        for row in rows {
+            let (filename, content) = row?;
+            let next_version = Self::next_document_version(tx, session_id, &filename)?;
+            tx.execute(
+                "INSERT INTO document_versions (id, session_id, filename, version, content) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    session_id,
+                    filename,
+                    next_version,
+                    content
+                ],
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn next_document_version(
+        tx: &rusqlite::Transaction<'_>,
+        session_id: &str,
+        filename: &str,
+    ) -> Result<i64, rusqlite::Error> {
+        let current: Option<i64> = tx.query_row(
+            "SELECT MAX(version) FROM document_versions WHERE session_id = ?1 AND filename = ?2",
+            params![session_id, filename],
+            |row| row.get(0),
+        )?;
+        Ok(current.unwrap_or(0) + 1)
+    }
+
+    fn get_current_document_row(
+        tx: &rusqlite::Transaction<'_>,
+        session_id: &str,
+        filename: &str,
+    ) -> Result<Option<String>, rusqlite::Error> {
+        let mut stmt =
+            tx.prepare("SELECT content FROM documents WHERE session_id = ?1 AND filename = ?2")?;
+        let mut rows = stmt.query(params![session_id, filename])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(row.get(0)?));
+        }
+        Ok(None)
     }
 }
 
@@ -535,7 +770,8 @@ mod tests {
         let msg = db
             .save_message(&session.id, "assistant", "content", Some(meta))
             .unwrap();
-        assert_eq!(msg.metadata.as_deref(), Some(meta));
+        let expected: serde_json::Value = serde_json::from_str(meta).unwrap();
+        assert_eq!(msg.metadata, Some(expected));
     }
 
     #[test]
@@ -558,7 +794,8 @@ mod tests {
         let session = db.create_session(None).unwrap();
 
         db.save_message(&session.id, "user", "q1", None).unwrap();
-        db.save_message(&session.id, "assistant", "old answer", None).unwrap();
+        db.save_message(&session.id, "assistant", "old answer", None)
+            .unwrap();
 
         let deleted = db.delete_last_assistant_message(&session.id).unwrap();
         assert!(deleted);
@@ -647,7 +884,10 @@ mod tests {
     fn set_and_get_preference() {
         let db = test_db();
         db.set_preference("theme", "dark").unwrap();
-        assert_eq!(db.get_preference("theme").unwrap(), Some("dark".to_string()));
+        assert_eq!(
+            db.get_preference("theme").unwrap(),
+            Some("dark".to_string())
+        );
     }
 
     #[test]

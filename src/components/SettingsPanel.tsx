@@ -2,7 +2,14 @@ import { useEffect, useState } from "react";
 import { X, RotateCcw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useChatStore } from "../stores/chatStore";
-import type { AppConfig, LLMConfig, SearchConfig, OutputConfig, UIConfig } from "../types";
+import type {
+  AppConfig,
+  LLMConfig,
+  SearchConfig,
+  OutputConfig,
+  UIConfig,
+  ProviderCapability,
+} from "../types";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -18,7 +25,14 @@ const SECTIONS: { key: Section; label: string }[] = [
 ];
 
 export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
-  const { loadConfig, updateConfig, listModels, installedModels } =
+  const {
+    loadConfig,
+    updateConfig,
+    listModels,
+    installedModels,
+    loadProviderCapabilities,
+    providerCapabilities,
+  } =
     useChatStore();
 
   const [isAdvanced, setIsAdvanced] = useState(false);
@@ -65,12 +79,21 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       });
       // Load installed models for dropdown
       listModels();
+      loadProviderCapabilities();
     }
-  }, [open, loadConfig, listModels]);
+  }, [open, loadConfig, listModels, loadProviderCapabilities]);
 
   if (!open) return null;
 
   const handleSave = async () => {
+    const capability = providerCapabilities?.providers.find((p) => p.key === llmProvider);
+    if (capability && !capability.supported) {
+      setSaveError(
+        capability.reason ?? `${llmProvider} is not available in this build yet.`,
+      );
+      return;
+    }
+
     setSaving(true);
 
     const llm: LLMConfig = {
@@ -289,10 +312,36 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                       onChange={(e) => setLlmProvider(e.target.value)}
                       className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
                     >
-                      <option value="ollama">Ollama (Local)</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="openai">OpenAI</option>
+                      {(providerCapabilities?.providers ?? [
+                        { key: "ollama", supported: true },
+                        { key: "anthropic", supported: true },
+                        { key: "openai", supported: true },
+                      ]).map((provider: ProviderCapability) => (
+                        <option
+                          key={provider.key}
+                          value={provider.key}
+                          disabled={!provider.supported}
+                        >
+                          {provider.key === "ollama"
+                            ? "Ollama (Local)"
+                            : provider.key === "openai"
+                              ? "OpenAI"
+                              : "Anthropic"}
+                          {!provider.supported ? " — coming soon" : ""}
+                        </option>
+                      ))}
                     </select>
+                    {providerCapabilities?.providers
+                      .filter((p) => !p.supported)
+                      .some((p) => p.key === llmProvider) && (
+                      <p className="text-xs text-status-warning mt-1.5">
+                        {
+                          providerCapabilities.providers.find(
+                            (p) => p.key === llmProvider,
+                          )?.reason
+                        }
+                      </p>
+                    )}
                   </div>
 
                   <div>

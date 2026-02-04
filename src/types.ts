@@ -25,6 +25,7 @@ export interface Message {
 export interface MessageMetadata {
   search_query?: string;
   search_results?: SearchResult[];
+  search_timestamp?: string;
   model_used?: string;
   tokens_used?: number;
 }
@@ -77,6 +78,20 @@ export interface GenerateDocumentsRequest {
   session_id: string;
 }
 
+export interface RegenerateDocumentRequest {
+  session_id: string;
+  filename: string;
+}
+
+export interface DocumentVersion {
+  id: string;
+  session_id: string;
+  filename: string;
+  version: number;
+  content: string;
+  created_at: string;
+}
+
 export interface SaveToFolderRequest {
   session_id: string;
   folder_path: string;
@@ -96,6 +111,17 @@ export interface LLMConfig {
   base_url: string;
   temperature: number;
   max_tokens: number;
+}
+
+export interface ProviderCapability {
+  key: LLMConfig["provider"];
+  supported: boolean;
+  reason?: string | null;
+}
+
+export interface ProviderCapabilities {
+  providers: ProviderCapability[];
+  default_provider: LLMConfig["provider"];
 }
 
 export interface SearchConfig {
@@ -129,6 +155,49 @@ export interface ErrorResponse {
   message: string;
   recoverable: boolean;
   action?: string;
+}
+
+export interface CoverageItem {
+  key: string;
+  label: string;
+  status: "covered" | "partial" | "missing";
+}
+
+export interface PlanningReadiness {
+  score: number;
+  must_haves: CoverageItem[];
+  should_haves: CoverageItem[];
+  unresolved_tbd: number;
+  recommendation: string;
+}
+
+export interface ConversationBranch {
+  id: string;
+  session_id: string;
+  name: string;
+  base_message_id?: string | null;
+  created_at: string;
+}
+
+export interface PlanTemplate {
+  id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  prompt_seed: string;
+}
+
+export interface RepoImportContext {
+  root: string;
+  detected_languages: string[];
+  key_files: string[];
+  summary: string;
+}
+
+export interface BacklogItem {
+  title: string;
+  body: string;
+  labels: string[];
 }
 
 // Model management

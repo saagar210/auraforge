@@ -6,7 +6,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Copy, Check, RefreshCw, FolderDown } from "lucide-react";
 import { clsx } from "clsx";
-import type { GeneratedDocument } from "../types";
+import type { GeneratedDocument, DocumentVersion } from "../types";
 
 const TAB_ORDER = ["START_HERE.md", "README.md", "SPEC.md", "CLAUDE.md", "PROMPTS.md", "CONVERSATION.md"];
 
@@ -158,6 +158,8 @@ interface DocumentPreviewProps {
   documents: GeneratedDocument[];
   stale: boolean;
   onRegenerate: () => void;
+  onRegenerateDocument: (filename: string) => void;
+  getDocumentVersions: (filename: string, limit?: number) => Promise<DocumentVersion[]>;
   regenerating: boolean;
   onSave: () => void;
 }
@@ -166,11 +168,16 @@ export function DocumentPreview({
   documents,
   stale,
   onRegenerate,
+  onRegenerateDocument,
+  getDocumentVersions,
   regenerating,
   onSave,
 }: DocumentPreviewProps) {
   const [activeTab, setActiveTab] = useState("START_HERE.md");
   const [copied, setCopied] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
+  const [versions, setVersions] = useState<DocumentVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -189,6 +196,27 @@ export function DocumentPreview({
     ? activeTab
     : sortedDocs[0]?.filename ?? activeTab;
   const activeDoc = sortedDocs.find((d) => d.filename === effectiveTab);
+  const previousVersion = versions[0];
+
+  useEffect(() => {
+    let cancelled = false;
+    setShowDiff(false);
+    setVersionsLoading(true);
+    getDocumentVersions(effectiveTab, 1)
+      .then((rows) => {
+        if (!cancelled) {
+          setVersions(rows);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setVersionsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveTab, getDocumentVersions]);
 
   const handleCopy = async () => {
     if (!activeDoc) return;
@@ -256,6 +284,31 @@ export function DocumentPreview({
           </button>
         )}
 
+        {activeDoc && (
+          <button
+            onClick={() => onRegenerateDocument(activeDoc.filename)}
+            disabled={regenerating}
+            aria-label={`Regenerate ${activeDoc.filename}`}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-text-secondary bg-transparent border border-border-subtle rounded-md cursor-pointer hover:text-text-primary hover:border-text-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCw
+              className={clsx("w-3 h-3", regenerating && "animate-spin")}
+              aria-hidden="true"
+            />
+            Regenerate This Doc
+          </button>
+        )}
+
+        {activeDoc && previousVersion && (
+          <button
+            onClick={() => setShowDiff((s) => !s)}
+            aria-label={showDiff ? "Hide diff" : "Show diff"}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-text-secondary bg-transparent border border-border-subtle rounded-md cursor-pointer hover:text-text-primary hover:border-text-muted transition-colors"
+          >
+            {showDiff ? "Hide Diff" : `Show Diff (v${previousVersion.version})`}
+          </button>
+        )}
+
         {/* Save to Folder */}
         <button
           onClick={onSave}
@@ -290,7 +343,19 @@ export function DocumentPreview({
       <div className="flex-1 overflow-y-auto px-6 py-6 bg-void">
         <div className="max-w-[720px] mx-auto prose-auraforge">
           {activeDoc ? (
-            <MarkdownContent content={activeDoc.content} />
+            showDiff ? (
+              versionsLoading ? (
+                <p className="text-text-muted text-sm">Loading version history...</p>
+              ) : previousVersion ? (
+                <pre className="text-xs leading-relaxed whitespace-pre-wrap bg-surface border border-border-subtle rounded-lg p-4 overflow-x-auto">
+                  {buildLineDiff(previousVersion.content, activeDoc.content)}
+                </pre>
+              ) : (
+                <p className="text-text-muted text-sm">No previous version available yet.</p>
+              )
+            ) : (
+              <MarkdownContent content={activeDoc.content} />
+            )
           ) : (
             <p className="text-text-muted text-center py-8">
               Select a document tab to view
@@ -300,4 +365,24 @@ export function DocumentPreview({
       </div>
     </div>
   );
+}
+
+export function buildLineDiff(previous: string, current: string): string {
+  const prevLines = previous.split("\n");
+  const nextLines = current.split("\n");
+  const max = Math.max(prevLines.length, nextLines.length);
+  const out: string[] = [];
+
+  for (let i = 0; i < max; i++) {
+    const a = prevLines[i];
+    const b = nextLines[i];
+    if (a === b) {
+      if (b !== undefined) out.push(`  ${b}`);
+      continue;
+    }
+    if (a !== undefined) out.push(`- ${a}`);
+    if (b !== undefined) out.push(`+ ${b}`);
+  }
+
+  return out.join("\n");
 }

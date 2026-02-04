@@ -66,11 +66,8 @@ pub fn run() {
                 } else {
                     log::LevelFilter::Warn
                 };
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(level)
-                        .build(),
-                )?;
+                app.handle()
+                    .plugin(tauri_plugin_log::Builder::default().level(level).build())?;
             }
 
             // Build menu bar
@@ -185,12 +182,21 @@ pub fn run() {
             commands::send_message,
             commands::cancel_response,
             commands::get_config,
+            commands::get_provider_capabilities,
             commands::update_search_config,
             commands::update_config,
             commands::generate_documents,
+            commands::regenerate_document,
             commands::get_documents,
+            commands::get_document_versions,
+            commands::assess_planning_readiness,
             commands::check_documents_stale,
             commands::save_to_folder,
+            commands::create_branch,
+            commands::list_branches,
+            commands::list_plan_templates,
+            commands::import_repository_context,
+            commands::build_issue_export_preview,
             commands::web_search,
         ])
         .run(tauri::generate_context!())

@@ -36,6 +36,16 @@ const markdownComponents = {
 export const ChatMessage = memo(
   function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === "user";
+  const sources = !isUser ? message.metadata?.search_results ?? [] : [];
+  const freshness = !isUser ? message.metadata?.search_timestamp : undefined;
+  const freshnessLabel = freshness
+    ? new Date(freshness).toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : null;
 
   return (
     <div
@@ -74,6 +84,32 @@ export const ChatMessage = memo(
           </ReactMarkdown>
         )}
       </div>
+      {!isUser && sources.length > 0 && (
+        <div className="mt-3 border-t border-border-subtle pt-2">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <span className="text-[11px] text-text-muted">Sources ({sources.length})</span>
+            {freshnessLabel && (
+              <span className="text-[11px] text-text-muted">Fresh as of {freshnessLabel}</span>
+            )}
+          </div>
+          <ul className="space-y-1">
+            {sources.slice(0, 3).map((result, idx) => (
+              <li key={`${result.url}-${idx}`} className="text-xs text-text-secondary truncate">
+                <a
+                  href={result.url}
+                  className="text-accent-glow underline underline-offset-2"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void openExternal(result.url);
+                  }}
+                >
+                  {result.title || result.url}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
   },

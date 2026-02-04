@@ -156,10 +156,7 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
         return Err(ConfigError::MissingField("llm.base_url".to_string()));
     }
     if let Err(e) = url::Url::parse(&config.llm.base_url) {
-        return Err(ConfigError::InvalidValue(format!(
-            "llm.base_url: {}",
-            e
-        )));
+        return Err(ConfigError::InvalidValue(format!("llm.base_url: {}", e)));
     }
 
     let search_provider = config.search.provider.as_str();
@@ -170,7 +167,9 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
         )));
     }
 
-    if config.search.enabled && search_provider == "tavily" && config.search.tavily_api_key.is_empty()
+    if config.search.enabled
+        && search_provider == "tavily"
+        && config.search.tavily_api_key.is_empty()
     {
         return Err(ConfigError::MissingField(
             "search.tavily_api_key".to_string(),
@@ -179,9 +178,7 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
 
     if config.search.enabled && search_provider == "searxng" && config.search.searxng_url.is_empty()
     {
-        return Err(ConfigError::MissingField(
-            "search.searxng_url".to_string(),
-        ));
+        return Err(ConfigError::MissingField("search.searxng_url".to_string()));
     }
     if config.search.enabled
         && search_provider == "searxng"

@@ -9,15 +9,20 @@ use crate::types::{GenerateComplete, GenerateProgress, GeneratedDocument, Messag
 
 use prompts::*;
 
+const DOC_CONFIGS: [(&str, &str); 5] = [
+    ("SPEC.md", SPEC_PROMPT),
+    ("CLAUDE.md", CLAUDE_PROMPT),
+    ("PROMPTS.md", PROMPTS_PROMPT),
+    ("README.md", README_PROMPT),
+    ("START_HERE.md", START_HERE_PROMPT),
+];
+
 pub async fn generate_all_documents(
     app: &tauri::AppHandle,
     state: &AppState,
     session_id: &str,
 ) -> Result<Vec<GeneratedDocument>, AppError> {
-    let messages = state
-        .db
-        .get_messages(session_id)
-        .map_err(AppError::from)?;
+    let messages = state.db.get_messages(session_id).map_err(AppError::from)?;
 
     let user_msgs = messages.iter().any(|m| m.role == "user");
     if !user_msgs {
@@ -26,10 +31,7 @@ pub async fn generate_all_documents(
         ));
     }
 
-    let session = state
-        .db
-        .get_session(session_id)
-        .map_err(AppError::from)?;
+    let session = state.db.get_session(session_id).map_err(AppError::from)?;
 
     let conversation = format_conversation_for_prompt(&messages);
     let config = state
@@ -41,18 +43,9 @@ pub async fn generate_all_documents(
     let mut drafts: Vec<(String, String)> = Vec::new();
     let include_conversation = config.output.include_conversation;
 
-    // Order: SPEC → CLAUDE → PROMPTS → README → START_HERE (cross-referencing order)
-    let doc_configs = [
-        ("SPEC.md", SPEC_PROMPT),
-        ("CLAUDE.md", CLAUDE_PROMPT),
-        ("PROMPTS.md", PROMPTS_PROMPT),
-        ("README.md", README_PROMPT),
-        ("START_HERE.md", START_HERE_PROMPT),
-    ];
+    let total = DOC_CONFIGS.len() + if include_conversation { 1 } else { 0 };
 
-    let total = doc_configs.len() + if include_conversation { 1 } else { 0 };
-
-    for (i, (filename, prompt_template)) in doc_configs.iter().enumerate() {
+    for (i, (filename, prompt_template)) in DOC_CONFIGS.iter().enumerate() {
         // Emit progress
         let _ = app.emit(
             "generate:progress",
@@ -80,50 +73,7 @@ pub async fn generate_all_documents(
             .replace("{current_date}", &today)
             .replace("{previously_generated_docs}", &previously_generated);
 
-        let system_prompt = DOCGEN_SYSTEM_PROMPT.replace("{current_date}", &today);
-
-        let llm_messages = vec![
-            ChatMessage {
-                role: "system".to_string(),
-                content: system_prompt.clone(),
-            },
-            ChatMessage {
-                role: "user".to_string(),
-                content: prompt.clone(),
-            },
-        ];
-
-        let mut content = state
-            .ollama
-            .generate(
-                &config.llm.base_url,
-                &config.llm.model,
-                llm_messages,
-                0.4, // Lower temperature for structured output
-            )
-            .await?;
-
-        // Validate output starts with # heading — retry once if not
-        if !content.trim_start().starts_with('#') {
-            let retry_messages = vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.clone(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: format!(
-                        "{}\n\nIMPORTANT: Start with a # heading. Output only valid Markdown.",
-                        prompt
-                    ),
-                },
-            ];
-
-            content = state
-                .ollama
-                .generate(&config.llm.base_url, &config.llm.model, retry_messages, 0.3)
-                .await?;
-        }
+        let content = generate_llm_document(state, &config, &today, &prompt).await?;
 
         drafts.push((filename.to_string(), content));
     }
@@ -158,6 +108,125 @@ pub async fn generate_all_documents(
     );
 
     Ok(documents)
+}
+
+pub async fn regenerate_single_document(
+    state: &AppState,
+    session_id: &str,
+    filename: &str,
+) -> Result<GeneratedDocument, AppError> {
+    let messages = state.db.get_messages(session_id).map_err(AppError::from)?;
+    if !messages.iter().any(|m| m.role == "user") {
+        return Err(AppError::Unknown(
+            "Cannot generate documents from an empty conversation".to_string(),
+        ));
+    }
+    let session = state.db.get_session(session_id).map_err(AppError::from)?;
+    let conversation = format_conversation_for_prompt(&messages);
+    let config = state
+        .config
+        .lock()
+        .map_err(|_| AppError::Config("Config lock poisoned".to_string()))?
+        .clone();
+
+    let content = if filename == "CONVERSATION.md" {
+        generate_conversation_md(&session, &messages)
+    } else {
+        let template = resolve_prompt_template(filename).ok_or_else(|| {
+            AppError::Unknown(format!(
+                "Unsupported document '{}'. Expected one of SPEC.md, CLAUDE.md, PROMPTS.md, README.md, START_HERE.md, CONVERSATION.md",
+                filename
+            ))
+        })?;
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let existing_docs = state
+            .db
+            .get_documents(session_id)
+            .map_err(AppError::from)?
+            .into_iter()
+            .filter(|d| d.filename != filename)
+            .map(|d| format!("## {}\n\n{}", d.filename, d.content))
+            .collect::<Vec<_>>();
+        let previously_generated = if existing_docs.is_empty() {
+            "No documents generated yet.".to_string()
+        } else {
+            existing_docs.join("\n\n---\n\n")
+        };
+        let prompt = template
+            .replace("{conversation_history}", &conversation)
+            .replace("{current_date}", &today)
+            .replace("{previously_generated_docs}", &previously_generated);
+        generate_llm_document(state, &config, &today, &prompt).await?
+    };
+
+    state
+        .db
+        .replace_document(session_id, filename, &content)
+        .map_err(AppError::from)
+}
+
+fn resolve_prompt_template(filename: &str) -> Option<&'static str> {
+    DOC_CONFIGS
+        .iter()
+        .find_map(|(name, template)| (*name == filename).then_some(*template))
+}
+
+async fn generate_llm_document(
+    state: &AppState,
+    config: &crate::types::AppConfig,
+    today: &str,
+    prompt: &str,
+) -> Result<String, AppError> {
+    let system_prompt = DOCGEN_SYSTEM_PROMPT.replace("{current_date}", today);
+    let llm_messages = vec![
+        ChatMessage {
+            role: "system".to_string(),
+            content: system_prompt.clone(),
+        },
+        ChatMessage {
+            role: "user".to_string(),
+            content: prompt.to_string(),
+        },
+    ];
+
+    let mut content = state
+        .ollama
+        .generate(
+            &config.llm.provider,
+            &config.llm.base_url,
+            &config.llm.model,
+            llm_messages,
+            0.4,
+        )
+        .await?;
+
+    if !content.trim_start().starts_with('#') {
+        let retry_messages = vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: system_prompt,
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: format!(
+                    "{}\n\nIMPORTANT: Start with a # heading. Output only valid Markdown.",
+                    prompt
+                ),
+            },
+        ];
+        content = state
+            .ollama
+            .generate(
+                &config.llm.provider,
+                &config.llm.base_url,
+                &config.llm.model,
+                retry_messages,
+                0.3,
+            )
+            .await?;
+    }
+
+    Ok(content)
 }
 
 fn format_conversation_for_prompt(messages: &[Message]) -> String {
@@ -202,11 +271,9 @@ fn generate_conversation_md(session: &Session, messages: &[Message]) -> String {
         output.push_str(&format!("{}: {}\n\n", role_label, message.content));
 
         // Include search context if present in metadata
-        if let Some(ref metadata_str) = message.metadata {
-            if let Ok(meta) = serde_json::from_str::<serde_json::Value>(metadata_str) {
-                if let Some(query) = meta.get("search_query").and_then(|v| v.as_str()) {
-                    output.push_str(&format!("*[Searched: {}]*\n\n", query));
-                }
+        if let Some(ref meta) = message.metadata {
+            if let Some(query) = meta.get("search_query").and_then(|v| v.as_str()) {
+                output.push_str(&format!("*[Searched: {}]*\n\n", query));
             }
         }
     }

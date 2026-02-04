@@ -12,10 +12,17 @@ import type {
   SearchConfig,
   HealthStatus,
   GeneratedDocument,
+  DocumentVersion,
   GenerateProgress,
   GenerateComplete,
   ModelPullProgress,
   OnboardingStep,
+  ProviderCapabilities,
+  PlanningReadiness,
+  ConversationBranch,
+  PlanTemplate,
+  RepoImportContext,
+  BacklogItem,
 } from "../types";
 import { normalizeError } from "../utils/errorMessages";
 import { resolveDefaultPath } from "../utils/paths";
@@ -60,10 +67,18 @@ interface ChatState {
   showSettings: boolean;
   setShowSettings: (show: boolean) => void;
   showHelp: boolean;
+  showPlanningOps: boolean;
+  setShowPlanningOps: (show: boolean) => void;
   sidebarCollapsed: boolean;
 
   // Config
   config: AppConfig | null;
+  providerCapabilities: ProviderCapabilities | null;
+  planningReadiness: PlanningReadiness | null;
+  branches: ConversationBranch[];
+  templates: PlanTemplate[];
+  repoImportContext: RepoImportContext | null;
+  exportPreview: BacklogItem[];
 
   // Loading
   sessionsLoading: boolean;
@@ -97,12 +112,21 @@ interface ChatState {
 
   // Config actions
   loadConfig: () => Promise<AppConfig | null>;
+  loadProviderCapabilities: () => Promise<ProviderCapabilities | null>;
+  loadTemplates: () => Promise<PlanTemplate[]>;
+  importRepositoryContext: (path: string, maxFiles?: number) => Promise<RepoImportContext | null>;
+  loadBranches: () => Promise<ConversationBranch[]>;
+  createBranch: (name: string, baseMessageId?: string | null) => Promise<ConversationBranch | null>;
+  loadIssueExportPreview: () => Promise<BacklogItem[]>;
   updateSearchConfig: (config: SearchConfig) => Promise<void>;
   updateConfig: (config: AppConfig) => Promise<AppConfig | null>;
 
   // Document actions
   generateDocuments: () => Promise<void>;
+  regenerateDocument: (filename: string) => Promise<void>;
+  getDocumentVersions: (filename: string, limit?: number) => Promise<DocumentVersion[]>;
   loadDocuments: () => Promise<void>;
+  assessPlanningReadiness: () => Promise<PlanningReadiness | null>;
   checkStale: () => Promise<void>;
   setShowPreview: (show: boolean) => void;
 
@@ -173,8 +197,15 @@ export const useChatStore = create<ChatState>((set, get) => {
   isFirstSession: true,
   showSettings: false,
   showHelp: false,
+  showPlanningOps: false,
   sidebarCollapsed: false,
   config: null,
+  providerCapabilities: null,
+  planningReadiness: null,
+  branches: [],
+  templates: [],
+  repoImportContext: null,
+  exportPreview: [],
   sessionsLoading: false,
   messagesLoading: false,
   preferencesLoaded: false,
@@ -182,6 +213,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   _unlisteners: [],
 
   setShowSettings: (show: boolean) => set({ showSettings: show }),
+  setShowPlanningOps: (show: boolean) => set({ showPlanningOps: show }),
 
   checkHealth: async () => {
     try {
@@ -272,6 +304,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         documents: [],
         showPreview: false,
         documentsStale: false,
+        planningReadiness: null,
+        branches: [],
+        exportPreview: [],
       }));
       return session;
     } catch (e) {
@@ -294,15 +329,20 @@ export const useChatStore = create<ChatState>((set, get) => {
       documents: [],
       showPreview: false,
       documentsStale: false,
+      planningReadiness: null,
+      branches: [],
+      exportPreview: [],
     });
     try {
       const messages = await invoke<Message[]>("get_messages", {
         session_id: sessionId,
       });
       set({ messages, messagesLoading: false });
+      get().assessPlanningReadiness();
 
       // Load cached documents if any
       get().loadDocuments();
+      get().loadBranches();
     } catch (e) {
       console.error("Failed to load messages:", e);
       set({ messagesLoading: false });
@@ -326,6 +366,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           documents:
             state.currentSessionId === sessionId ? [] : state.documents,
           showPreview: state.currentSessionId === sessionId ? false : state.showPreview,
+          branches: state.currentSessionId === sessionId ? [] : state.branches,
+          exportPreview: state.currentSessionId === sessionId ? [] : state.exportPreview,
         };
       });
       const newId = get().currentSessionId;
@@ -356,6 +398,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           messages: activeDeleted ? [] : state.messages,
           documents: activeDeleted ? [] : state.documents,
           showPreview: activeDeleted ? false : state.showPreview,
+          branches: activeDeleted ? [] : state.branches,
+          exportPreview: activeDeleted ? [] : state.exportPreview,
         };
       });
       const newId = get().currentSessionId;
@@ -424,6 +468,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         searchQuery: null,
         searchResults: null,
       });
+      get().assessPlanningReadiness();
 
       // Mark documents as stale if they exist
       if (get().documents.length > 0) {
@@ -554,6 +599,96 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
   },
 
+  loadProviderCapabilities: async () => {
+    try {
+      const capabilities = await invoke<ProviderCapabilities>("get_provider_capabilities");
+      set({ providerCapabilities: capabilities });
+      return capabilities;
+    } catch (e) {
+      console.error("Failed to load provider capabilities:", e);
+      return null;
+    }
+  },
+
+  loadTemplates: async () => {
+    try {
+      const templates = await invoke<PlanTemplate[]>("list_plan_templates");
+      set({ templates });
+      return templates;
+    } catch (e) {
+      console.error("Failed to load templates:", e);
+      return [];
+    }
+  },
+
+  importRepositoryContext: async (path: string, maxFiles = 400) => {
+    try {
+      const context = await invoke<RepoImportContext>("import_repository_context", {
+        request: { path, max_files: maxFiles },
+      });
+      set({ repoImportContext: context });
+      return context;
+    } catch (e) {
+      console.error("Failed to import repository context:", e);
+      return null;
+    }
+  },
+
+  loadBranches: async () => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) {
+      set({ branches: [] });
+      return [];
+    }
+    try {
+      const branches = await invoke<ConversationBranch[]>("list_branches", {
+        session_id: sessionId,
+      });
+      set({ branches });
+      return branches;
+    } catch (e) {
+      console.error("Failed to load branches:", e);
+      return [];
+    }
+  },
+
+  createBranch: async (name: string, baseMessageId: string | null = null) => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return null;
+    try {
+      const branch = await invoke<ConversationBranch>("create_branch", {
+        request: {
+          session_id: sessionId,
+          name,
+          base_message_id: baseMessageId,
+        },
+      });
+      set((state) => ({ branches: [branch, ...state.branches] }));
+      return branch;
+    } catch (e) {
+      console.error("Failed to create branch:", e);
+      return null;
+    }
+  },
+
+  loadIssueExportPreview: async () => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) {
+      set({ exportPreview: [] });
+      return [];
+    }
+    try {
+      const preview = await invoke<BacklogItem[]>("build_issue_export_preview", {
+        session_id: sessionId,
+      });
+      set({ exportPreview: preview });
+      return preview;
+    } catch (e) {
+      console.error("Failed to build issue export preview:", e);
+      return [];
+    }
+  },
+
   updateSearchConfig: async (searchConfig: SearchConfig) => {
     try {
       await invoke("update_search_config", { search_config: searchConfig });
@@ -621,6 +756,46 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
   },
 
+  regenerateDocument: async (filename: string) => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId || get().isGenerating) return;
+    set({ isGenerating: true, _generatingSessionId: sessionId });
+    try {
+      await invoke<GeneratedDocument>("regenerate_document", {
+        request: { session_id: sessionId, filename },
+      });
+      await get().loadDocuments();
+      set({
+        isGenerating: false,
+        _generatingSessionId: null,
+        documentsStale: false,
+      });
+    } catch (e) {
+      console.error("Failed to regenerate document:", e);
+      set({
+        isGenerating: false,
+        _generatingSessionId: null,
+        streamError: `Document regeneration failed: ${normalizeError(e)}`,
+      });
+    }
+  },
+
+  getDocumentVersions: async (filename: string, limit = 10) => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return [];
+    try {
+      const versions = await invoke<DocumentVersion[]>("get_document_versions", {
+        session_id: sessionId,
+        filename,
+        limit,
+      });
+      return versions;
+    } catch (e) {
+      console.error("Failed to load document versions:", e);
+      return [];
+    }
+  },
+
   loadDocuments: async () => {
     const sessionId = get().currentSessionId;
     if (!sessionId) return;
@@ -650,6 +825,21 @@ export const useChatStore = create<ChatState>((set, get) => {
       set({ documentsStale: stale });
     } catch (e) {
       console.error("Failed to check staleness:", e);
+    }
+  },
+
+  assessPlanningReadiness: async () => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return null;
+    try {
+      const readiness = await invoke<PlanningReadiness>("assess_planning_readiness", {
+        session_id: sessionId,
+      });
+      set({ planningReadiness: readiness });
+      return readiness;
+    } catch (e) {
+      console.error("Failed to assess planning readiness:", e);
+      return null;
     }
   },
 
