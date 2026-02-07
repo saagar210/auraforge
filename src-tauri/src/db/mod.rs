@@ -688,7 +688,10 @@ mod tests {
     fn set_and_get_preference() {
         let db = test_db();
         db.set_preference("theme", "dark").unwrap();
-        assert_eq!(db.get_preference("theme").unwrap(), Some("dark".to_string()));
+        assert_eq!(
+            db.get_preference("theme").unwrap(),
+            Some("dark".to_string())
+        );
     }
 
     #[test]

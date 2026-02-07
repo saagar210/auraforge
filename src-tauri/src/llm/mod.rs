@@ -345,8 +345,7 @@ impl OllamaClient {
         let model_base = model.split(':').next().unwrap_or(model);
         Ok(tags.models.iter().any(|m| {
             m.name == model
-                || (!model.contains(':')
-                    && m.name.starts_with(&format!("{}:", model_base)))
+                || (!model.contains(':') && m.name.starts_with(&format!("{}:", model_base)))
         }))
     }
 

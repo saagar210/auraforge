@@ -231,10 +231,7 @@ pub async fn get_preference(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<Option<String>, ErrorResponse> {
-    state
-        .db
-        .get_preference(&key)
-        .map_err(to_response)
+    state.db.get_preference(&key).map_err(to_response)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -243,10 +240,7 @@ pub async fn set_preference(
     key: String,
     value: String,
 ) -> Result<(), ErrorResponse> {
-    state
-        .db
-        .set_preference(&key, &value)
-        .map_err(to_response)
+    state.db.set_preference(&key, &value).map_err(to_response)
 }
 
 // ============ MODELS ============
@@ -319,9 +313,7 @@ pub async fn check_disk_space() -> Result<DiskSpace, ErrorResponse> {
         }
 
         // Fallback: try `df` command (works on macOS/Linux, fails gracefully elsewhere)
-        let output = std::process::Command::new("df")
-            .args(["-k", "/"])
-            .output();
+        let output = std::process::Command::new("df").args(["-k", "/"]).output();
 
         let available_gb = match output {
             Ok(out) => {
@@ -372,10 +364,7 @@ pub async fn create_session(
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn get_sessions(state: State<'_, AppState>) -> Result<Vec<Session>, ErrorResponse> {
-    state
-        .db
-        .get_sessions()
-        .map_err(to_response)
+    state.db.get_sessions().map_err(to_response)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -450,15 +439,16 @@ pub async fn send_message(
     // Save user message (skip on retry — message already exists in DB)
     let user_msg = if is_retry {
         // Find the last user message from DB
-        let messages = state
-            .db
-            .get_messages(&session_id)
-            .map_err(to_response)?;
+        let messages = state.db.get_messages(&session_id).map_err(to_response)?;
         let last_user = messages
             .into_iter()
             .rev()
             .find(|m| m.role == "user")
-            .ok_or_else(|| to_response(AppError::Unknown("No user message found to retry".to_string())))?;
+            .ok_or_else(|| {
+                to_response(AppError::Unknown(
+                    "No user message found to retry".to_string(),
+                ))
+            })?;
         // Remove the old assistant response to avoid duplicates
         if let Err(e) = state.db.delete_last_assistant_message(&session_id) {
             log::warn!("Failed to delete old assistant message on retry: {}", e);
@@ -533,10 +523,7 @@ pub async fn send_message(
     }
 
     // Build conversation history for LLM
-    let db_messages = state
-        .db
-        .get_messages(&session_id)
-        .map_err(to_response)?;
+    let db_messages = state.db.get_messages(&session_id).map_err(to_response)?;
 
     let mut chat_messages = vec![ChatMessage {
         role: "system".to_string(),
@@ -736,10 +723,8 @@ pub async fn save_to_folder(
             return Err(AppError::FolderExists(output_path_for_thread));
         }
 
-        let staging_dir = output_dir_for_thread.with_extension(format!(
-            "plan_tmp_{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let staging_dir = output_dir_for_thread
+            .with_extension(format!("plan_tmp_{}", uuid::Uuid::new_v4().simple()));
 
         std::fs::create_dir(&staging_dir).map_err(|e| {
             if e.kind() == std::io::ErrorKind::PermissionDenied {
@@ -763,7 +748,8 @@ pub async fn save_to_folder(
                     if e.raw_os_error() == Some(28) {
                         AppError::FileSystem {
                             path: final_file_path.to_string_lossy().to_string(),
-                            message: "Not enough disk space. Free up space and try again.".to_string(),
+                            message: "Not enough disk space. Free up space and try again."
+                                .to_string(),
                         }
                     } else if e.kind() == std::io::ErrorKind::PermissionDenied {
                         AppError::FileSystem {

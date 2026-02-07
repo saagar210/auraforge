@@ -14,10 +14,7 @@ pub async fn generate_all_documents(
     state: &AppState,
     session_id: &str,
 ) -> Result<Vec<GeneratedDocument>, AppError> {
-    let messages = state
-        .db
-        .get_messages(session_id)
-        .map_err(AppError::from)?;
+    let messages = state.db.get_messages(session_id).map_err(AppError::from)?;
 
     let user_msgs = messages.iter().any(|m| m.role == "user");
     if !user_msgs {
@@ -26,10 +23,7 @@ pub async fn generate_all_documents(
         ));
     }
 
-    let session = state
-        .db
-        .get_session(session_id)
-        .map_err(AppError::from)?;
+    let session = state.db.get_session(session_id).map_err(AppError::from)?;
 
     let conversation = format_conversation_for_prompt(&messages);
     let config = state

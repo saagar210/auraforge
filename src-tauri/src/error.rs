@@ -135,7 +135,9 @@ impl From<SearchError> for AppError {
             SearchError::InvalidApiKey => AppError::TavilyError("Invalid API key".to_string()),
             SearchError::RateLimited => AppError::SearchRateLimit,
             SearchError::NoResults => AppError::SearchUnavailable,
-            SearchError::NetworkError(_) | SearchError::ParseError(_) => AppError::SearchUnavailable,
+            SearchError::NetworkError(_) | SearchError::ParseError(_) => {
+                AppError::SearchUnavailable
+            }
         }
     }
 }
