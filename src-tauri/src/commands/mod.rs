@@ -9,6 +9,7 @@ use crate::error::{AppError, ErrorResponse};
 use crate::llm::ChatMessage;
 use crate::search::{self, SearchResult};
 use crate::state::AppState;
+use crate::templates;
 use crate::types::*;
 
 const SYSTEM_PROMPT: &str = r##"You are AuraForge, a senior engineering planning partner. You help people transform project ideas into comprehensive plans that AI coding tools (like Claude Code) can execute with minimal guesswork.
@@ -373,6 +374,41 @@ pub async fn create_session(
         .db
         .create_session(request.name.as_deref())
         .map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn list_templates() -> Result<Vec<PlanningTemplate>, ErrorResponse> {
+    templates::list_templates().map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn create_session_from_template(
+    state: State<'_, AppState>,
+    request: CreateSessionFromTemplateRequest,
+) -> Result<Session, ErrorResponse> {
+    let template = templates::get_template(&request.template_id).map_err(to_response)?;
+    let session_name = request.name.as_deref().unwrap_or(template.name.as_str());
+    let session = state
+        .db
+        .create_session(Some(session_name))
+        .map_err(to_response)?;
+
+    let metadata = serde_json::json!({
+        "template_id": template.id,
+        "template_version": template.version,
+    })
+    .to_string();
+    state
+        .db
+        .save_message(
+            &session.id,
+            "assistant",
+            &template.seed_prompt,
+            Some(metadata.as_str()),
+        )
+        .map_err(to_response)?;
+
+    state.db.get_session(&session.id).map_err(to_response)
 }
 
 #[tauri::command(rename_all = "snake_case")]

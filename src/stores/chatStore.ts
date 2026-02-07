@@ -11,6 +11,7 @@ import type {
   AppConfig,
   SearchConfig,
   HealthStatus,
+  PlanningTemplate,
   GeneratedDocument,
   GenerateProgress,
   GenerateComplete,
@@ -28,6 +29,7 @@ import { resolveDefaultPath } from "../utils/paths";
 interface ChatState {
   // Sessions
   sessions: Session[];
+  templates: PlanningTemplate[];
   currentSessionId: string | null;
 
   // Messages
@@ -86,6 +88,8 @@ interface ChatState {
   retryLastMessage: () => Promise<void>;
   loadSessions: () => Promise<void>;
   createSession: () => Promise<Session | null>;
+  createSessionFromTemplate: (templateId: string) => Promise<Session | null>;
+  loadTemplates: () => Promise<void>;
   selectSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   deleteSessions: (sessionIds: string[]) => Promise<void>;
@@ -180,6 +184,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
   return ({
   sessions: [],
+  templates: [],
   currentSessionId: null,
   messages: [],
   isStreaming: false,
@@ -318,6 +323,56 @@ export const useChatStore = create<ChatState>((set, get) => {
     } catch (e) {
       console.error("Failed to create session:", e);
       return null;
+    }
+  },
+
+  createSessionFromTemplate: async (templateId: string) => {
+    try {
+      const session = await invoke<Session>("create_session_from_template", {
+        request: { template_id: templateId, name: null },
+      });
+
+      set((state) => ({
+        sessions: [session, ...state.sessions.filter((s) => s.id !== session.id)],
+        currentSessionId: session.id,
+        messages: [],
+        messagesLoading: true,
+        streamingContent: "",
+        streamError: null,
+        isStreaming: false,
+        searchQuery: null,
+        searchResults: null,
+        documents: [],
+        showPreview: false,
+        documentsStale: false,
+        planReadiness: null,
+        planningCoverage: null,
+        generationConfidence: null,
+        generationMetadata: null,
+      }));
+
+      const messages = await invoke<Message[]>("get_messages", {
+        session_id: session.id,
+      });
+
+      if (get().currentSessionId === session.id) {
+        set({ messages, messagesLoading: false });
+      }
+      void get().getPlanningCoverage();
+      return session;
+    } catch (e) {
+      console.error("Failed to create session from template:", e);
+      set({ messagesLoading: false });
+      return null;
+    }
+  },
+
+  loadTemplates: async () => {
+    try {
+      const templates = await invoke<PlanningTemplate[]>("list_templates");
+      set({ templates });
+    } catch (e) {
+      console.error("Failed to load templates:", e);
     }
   },
 

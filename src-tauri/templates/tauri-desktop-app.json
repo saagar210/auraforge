@@ -1,0 +1,8 @@
+{
+  "id": "tauri-desktop-app",
+  "name": "Tauri Desktop App",
+  "description": "Cross-platform desktop app with local file access and Rust command boundaries.",
+  "target_stack": "Tauri + React + Rust",
+  "version": 1,
+  "seed_prompt": "Great, you're building a Tauri desktop app. Let's lock the core local workflow first: what the user does from launch to success, what data stays local, and where filesystem reads/writes happen. Describe the primary workflow in 3-5 concrete steps."
+}

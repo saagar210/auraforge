@@ -12,6 +12,20 @@ export interface CreateSessionRequest {
   name?: string;
 }
 
+export interface PlanningTemplate {
+  id: string;
+  name: string;
+  description: string;
+  target_stack: string;
+  version: number;
+  seed_prompt: string;
+}
+
+export interface CreateSessionFromTemplateRequest {
+  template_id: string;
+  name?: string;
+}
+
 // Message types
 export interface Message {
   id: string;

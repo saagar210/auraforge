@@ -1,10 +1,13 @@
 import { Flame, ArrowRight } from "lucide-react";
+import type { PlanningTemplate } from "../types";
 
 interface EmptyStateProps {
   hasSession: boolean;
   onNewProject: () => void;
   isFirstSession?: boolean;
   onSuggestionClick?: (text: string) => void;
+  templates?: PlanningTemplate[];
+  onTemplateSelect?: (templateId: string) => void;
 }
 
 const SUGGESTIONS = [
@@ -18,6 +21,8 @@ export function EmptyState({
   onNewProject,
   isFirstSession,
   onSuggestionClick,
+  templates = [],
+  onTemplateSelect,
 }: EmptyStateProps) {
   if (hasSession && isFirstSession) {
     return (
@@ -67,6 +72,24 @@ export function EmptyState({
             </button>
           ))}
         </div>
+
+        {templates.length > 0 && (
+          <div className="mt-5 w-full max-w-lg">
+            <p className="text-xs text-text-muted mb-2">Or start from a template</p>
+            <div className="flex flex-wrap gap-2 justify-center">
+              {templates.map((template) => (
+                <button
+                  key={template.id}
+                  onClick={() => onTemplateSelect?.(template.id)}
+                  className="px-3 py-1.5 bg-surface border border-border-default rounded-full text-xs text-text-secondary hover:text-accent-gold hover:border-accent-gold/40 transition-colors cursor-pointer"
+                  title={template.description}
+                >
+                  {template.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -109,6 +132,23 @@ export function EmptyState({
       >
         Begin
       </button>
+      {templates.length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs text-text-muted mb-2">Start from a template</p>
+          <div className="flex flex-wrap gap-2 justify-center">
+            {templates.map((template) => (
+              <button
+                key={template.id}
+                onClick={() => onTemplateSelect?.(template.id)}
+                className="px-3 py-1.5 bg-surface border border-border-default rounded-full text-xs text-text-secondary hover:text-accent-gold hover:border-accent-gold/40 transition-colors cursor-pointer"
+                title={template.description}
+              >
+                {template.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -38,6 +38,7 @@ function App() {
   const {
     currentSessionId,
     messages,
+    templates,
     isStreaming,
     streamingContent,
     streamError,
@@ -64,7 +65,9 @@ function App() {
     setShowSettings,
     setShowHelp,
     loadSessions,
+    loadTemplates,
     createSession,
+    createSessionFromTemplate,
     sendMessage,
     cancelResponse,
     clearStreamError,
@@ -98,6 +101,7 @@ function App() {
     loadPreferences();
     checkHealth();
     loadSessions();
+    loadTemplates();
     loadConfig();
     initEventListeners();
     return () => cleanupEventListeners();
@@ -181,6 +185,10 @@ function App() {
 
   const handleNewProject = async () => {
     await createSession();
+  };
+
+  const handleTemplateStart = async (templateId: string) => {
+    await createSessionFromTemplate(templateId);
   };
 
   const handleSuggestionClick = (text: string) => {
@@ -449,6 +457,8 @@ function App() {
                         onNewProject={handleNewProject}
                         isFirstSession={isFirstSession}
                         onSuggestionClick={handleSuggestionClick}
+                        templates={templates}
+                        onTemplateSelect={handleTemplateStart}
                       />
                     ) : (
                       <>
@@ -562,7 +572,12 @@ function App() {
             )}
           </>
         ) : (
-          <EmptyState hasSession={false} onNewProject={handleNewProject} />
+          <EmptyState
+            hasSession={false}
+            onNewProject={handleNewProject}
+            templates={templates}
+            onTemplateSelect={handleTemplateStart}
+          />
         )}
       </main>
 

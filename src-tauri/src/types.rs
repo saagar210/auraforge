@@ -103,6 +103,12 @@ pub struct SaveToFolderRequest {
     pub folder_path: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateSessionFromTemplateRequest {
+    pub template_id: String,
+    pub name: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ForgeTarget {
@@ -217,6 +223,16 @@ pub struct GenerationMetadata {
     pub quality_json: Option<String>,
     pub confidence_json: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanningTemplate {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub target_stack: String,
+    pub version: u8,
+    pub seed_prompt: String,
 }
 
 impl Default for AppConfig {

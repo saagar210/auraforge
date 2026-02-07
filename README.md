@@ -279,7 +279,7 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 
 - [ ] Linux builds (Windows deferred)
 - [x] Additional local model runtimes (LM Studio/OpenAI-compatible local endpoints)
-- [ ] Project templates for common app types
+- [x] Project templates for common app types
 - [ ] Import existing codebases for refactoring plans
 - [ ] Export to GitHub Issues / Linear integration
 - [ ] Conversation branching — explore alternate decisions without losing the main thread

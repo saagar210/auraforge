@@ -6,6 +6,7 @@ mod error;
 mod llm;
 mod search;
 mod state;
+mod templates;
 mod types;
 
 use std::sync::Mutex;
@@ -173,11 +174,13 @@ pub fn run() {
             commands::cancel_pull_model,
             commands::check_disk_space,
             commands::create_session,
+            commands::create_session_from_template,
             commands::get_sessions,
             commands::get_session,
             commands::update_session,
             commands::delete_session,
             commands::delete_sessions,
+            commands::list_templates,
             commands::get_messages,
             commands::send_message,
             commands::cancel_response,
