@@ -224,7 +224,10 @@ impl Database {
     pub fn get_messages(&self, session_id: &str) -> Result<Vec<Message>, rusqlite::Error> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, session_id, role, content, metadata, created_at FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
+            "SELECT id, session_id, role, content, metadata, created_at \
+             FROM messages \
+             WHERE session_id = ?1 \
+             ORDER BY rowid ASC",
         )?;
 
         let rows = stmt.query_map(params![session_id], |row| {
@@ -247,7 +250,7 @@ impl Database {
             "DELETE FROM messages WHERE id = (
                 SELECT id FROM messages
                 WHERE session_id = ?1 AND role = 'assistant'
-                ORDER BY created_at DESC LIMIT 1
+                ORDER BY rowid DESC LIMIT 1
             )",
             params![session_id],
         )?;
@@ -558,14 +561,52 @@ mod tests {
         let session = db.create_session(None).unwrap();
 
         db.save_message(&session.id, "user", "q1", None).unwrap();
-        db.save_message(&session.id, "assistant", "old answer", None).unwrap();
+        db.save_message(&session.id, "assistant", "old answer", None)
+            .unwrap();
+        db.save_message(&session.id, "assistant", "new answer", None)
+            .unwrap();
+
+        {
+            let conn = db.conn();
+            conn.execute(
+                "UPDATE messages SET created_at = '2026-01-01 00:00:00' WHERE session_id = ?1",
+                params![session.id],
+            )
+            .unwrap();
+        }
 
         let deleted = db.delete_last_assistant_message(&session.id).unwrap();
         assert!(deleted);
 
         let msgs = db.get_messages(&session.id).unwrap();
-        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[1].role, "assistant");
+        assert_eq!(msgs[1].content, "old answer");
+    }
+
+    #[test]
+    fn get_messages_preserves_insert_order_with_identical_timestamps() {
+        let db = test_db();
+        let session = db.create_session(None).unwrap();
+
+        db.save_message(&session.id, "user", "first", None).unwrap();
+        db.save_message(&session.id, "assistant", "second", None)
+            .unwrap();
+        db.save_message(&session.id, "user", "third", None).unwrap();
+
+        {
+            let conn = db.conn();
+            conn.execute(
+                "UPDATE messages SET created_at = '2026-01-01 00:00:00' WHERE session_id = ?1",
+                params![session.id],
+            )
+            .unwrap();
+        }
+
+        let msgs = db.get_messages(&session.id).unwrap();
+        let contents: Vec<_> = msgs.into_iter().map(|m| m.content).collect();
+        assert_eq!(contents, vec!["first", "second", "third"]);
     }
 
     #[test]
