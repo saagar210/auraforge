@@ -91,6 +91,7 @@ interface ChatState {
   loadSessions: () => Promise<void>;
   createSession: () => Promise<Session | null>;
   createSessionFromTemplate: (templateId: string) => Promise<Session | null>;
+  createBranchFromMessage: (messageId?: string) => Promise<Session | null>;
   loadTemplates: () => Promise<void>;
   selectSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
@@ -369,6 +370,40 @@ export const useChatStore = create<ChatState>((set, get) => {
     } catch (e) {
       console.error("Failed to create session from template:", e);
       set({ messagesLoading: false });
+      return null;
+    }
+  },
+
+  createBranchFromMessage: async (messageId?: string) => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return null;
+
+    try {
+      const session = await invoke<Session>("create_branch_from_message", {
+        request: {
+          session_id: sessionId,
+          from_message_id: messageId ?? null,
+          name: null,
+        },
+      });
+      set((state) => ({
+        sessions: [session, ...state.sessions.filter((s) => s.id !== session.id)],
+      }));
+      await get().selectSession(session.id);
+      set({
+        toast: {
+          message: `Created branch: ${session.name}`,
+          type: "success",
+        },
+      });
+      return session;
+    } catch (e) {
+      set({
+        toast: {
+          message: normalizeError(e),
+          type: "error",
+        },
+      });
       return null;
     }
   },

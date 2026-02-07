@@ -68,6 +68,7 @@ function App() {
     loadTemplates,
     createSession,
     createSessionFromTemplate,
+    createBranchFromMessage,
     sendMessage,
     cancelResponse,
     clearStreamError,
@@ -190,6 +191,13 @@ function App() {
   const handleTemplateStart = async (templateId: string) => {
     await createSessionFromTemplate(templateId);
   };
+
+  const handleBranchFromMessage = useCallback(
+    async (messageId: string) => {
+      await createBranchFromMessage(messageId);
+    },
+    [createBranchFromMessage],
+  );
 
   const handleSuggestionClick = (text: string) => {
     setInputValue(`I want to build ${text.toLowerCase()}`);
@@ -471,7 +479,11 @@ function App() {
                           </button>
                         )}
                         {visibleMessages.map((msg) => (
-                          <ChatMessage key={msg.id} message={msg} />
+                          <ChatMessage
+                            key={msg.id}
+                            message={msg}
+                            onBranch={handleBranchFromMessage}
+                          />
                         ))}
 
                         {/* Streaming response */}

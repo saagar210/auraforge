@@ -26,6 +26,12 @@ export interface CreateSessionFromTemplateRequest {
   name?: string;
 }
 
+export interface CreateBranchRequest {
+  session_id: string;
+  from_message_id?: string;
+  name?: string;
+}
+
 export interface CodebaseImportSummary {
   root_path: string;
   files_scanned: number;

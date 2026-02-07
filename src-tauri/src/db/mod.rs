@@ -78,6 +78,14 @@ impl Database {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS session_branches (
+                branch_session_id TEXT PRIMARY KEY,
+                root_session_id TEXT NOT NULL,
+                source_session_id TEXT NOT NULL,
+                source_message_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (branch_session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version INTEGER PRIMARY KEY
             );
@@ -86,6 +94,7 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_documents_session ON documents(session_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_generation_metadata_created ON generation_metadata(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_branch_root ON session_branches(root_session_id);
             ",
         )?;
         Self::ensure_column_exists(&conn, "generation_metadata", "confidence_json", "TEXT")?;
@@ -178,6 +187,40 @@ impl Database {
         }
         tx.commit()?;
         Ok(deleted)
+    }
+
+    pub fn get_branch_root_session_id(&self, session_id: &str) -> Result<String, rusqlite::Error> {
+        let conn = self.conn();
+        match conn.query_row(
+            "SELECT root_session_id FROM session_branches WHERE branch_session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        ) {
+            Ok(root_id) => Ok(root_id),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(session_id.to_string()),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn register_branch(
+        &self,
+        branch_session_id: &str,
+        root_session_id: &str,
+        source_session_id: &str,
+        source_message_id: Option<&str>,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.conn();
+        conn.execute(
+            "INSERT OR REPLACE INTO session_branches (branch_session_id, root_session_id, source_session_id, source_message_id)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                branch_session_id,
+                root_session_id,
+                source_session_id,
+                source_message_id
+            ],
+        )?;
+        Ok(())
     }
 
     fn read_session_row(conn: &Connection, id: &str) -> Result<Session, rusqlite::Error> {
@@ -895,6 +938,21 @@ mod tests {
         // Cascade: messages removed
         assert!(db.get_messages(&s1.id).unwrap().is_empty());
         assert!(db.get_messages(&s2.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn register_branch_and_resolve_root() {
+        let db = test_db();
+        let root = db.create_session(Some("Root")).unwrap();
+        let branch = db.create_session(Some("Branch")).unwrap();
+
+        db.register_branch(&branch.id, &root.id, &root.id, None)
+            .unwrap();
+
+        let resolved = db.get_branch_root_session_id(&branch.id).unwrap();
+        assert_eq!(resolved, root.id);
+        let root_resolved = db.get_branch_root_session_id(&root.id).unwrap();
+        assert_eq!(root_resolved, root.id);
     }
 
     #[test]

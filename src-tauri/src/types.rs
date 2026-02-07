@@ -115,6 +115,13 @@ pub struct CreateSessionFromTemplateRequest {
     pub name: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateBranchRequest {
+    pub session_id: String,
+    pub from_message_id: Option<String>,
+    pub name: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ForgeTarget {

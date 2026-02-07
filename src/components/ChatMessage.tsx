@@ -7,6 +7,7 @@ import type { Message } from "../types";
 
 interface ChatMessageProps {
   message: Message;
+  onBranch?: (messageId: string) => void;
 }
 
 const markdownComponents = {
@@ -34,7 +35,7 @@ const markdownComponents = {
 };
 
 export const ChatMessage = memo(
-  function ChatMessage({ message }: ChatMessageProps) {
+  function ChatMessage({ message, onBranch }: ChatMessageProps) {
   const isUser = message.role === "user";
 
   return (
@@ -74,6 +75,17 @@ export const ChatMessage = memo(
           </ReactMarkdown>
         )}
       </div>
+      {onBranch && (
+        <div className="mt-2 flex justify-end">
+          <button
+            onClick={() => onBranch(message.id)}
+            className="text-[10px] uppercase tracking-wide text-text-muted hover:text-accent-gold transition-colors cursor-pointer bg-transparent border border-border-subtle rounded px-2 py-0.5"
+            aria-label="Create branch from this message"
+          >
+            Branch Here
+          </button>
+        </div>
+      )}
     </div>
   );
   },

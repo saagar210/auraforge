@@ -176,6 +176,7 @@ pub fn run() {
             commands::check_disk_space,
             commands::create_session,
             commands::create_session_from_template,
+            commands::create_branch_from_message,
             commands::get_sessions,
             commands::get_session,
             commands::update_session,

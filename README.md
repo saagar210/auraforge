@@ -282,7 +282,7 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 - [x] Project templates for common app types
 - [x] Import existing codebases for refactoring plans
 - [ ] Export to GitHub Issues / Linear integration
-- [ ] Conversation branching — explore alternate decisions without losing the main thread
+- [x] Conversation branching — explore alternate decisions without losing the main thread
 
 ---
 

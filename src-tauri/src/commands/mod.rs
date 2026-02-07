@@ -413,6 +413,98 @@ pub async fn create_session_from_template(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn create_branch_from_message(
+    state: State<'_, AppState>,
+    request: CreateBranchRequest,
+) -> Result<Session, ErrorResponse> {
+    let source_session = state
+        .db
+        .get_session(&request.session_id)
+        .map_err(to_response)?;
+    let source_messages = state
+        .db
+        .get_messages(&request.session_id)
+        .map_err(to_response)?;
+    if source_messages.is_empty() {
+        return Err(to_response(AppError::Validation(
+            "Cannot branch an empty conversation.".to_string(),
+        )));
+    }
+
+    let cutoff_index = match request.from_message_id.as_ref() {
+        Some(message_id) => source_messages
+            .iter()
+            .position(|message| &message.id == message_id)
+            .ok_or_else(|| {
+                to_response(AppError::Validation(format!(
+                    "Message '{}' was not found in this session.",
+                    message_id
+                )))
+            })?,
+        None => source_messages.len() - 1,
+    };
+    let copied_messages = &source_messages[..=cutoff_index];
+
+    let default_name = request
+        .name
+        .unwrap_or_else(|| format!("{} (branch)", source_session.name));
+    let branch_session = state
+        .db
+        .create_session(Some(default_name.as_str()))
+        .map_err(to_response)?;
+    let root_session_id = state
+        .db
+        .get_branch_root_session_id(&request.session_id)
+        .map_err(to_response)?;
+    state
+        .db
+        .register_branch(
+            &branch_session.id,
+            &root_session_id,
+            &request.session_id,
+            request.from_message_id.as_deref(),
+        )
+        .map_err(to_response)?;
+
+    for message in copied_messages {
+        if message.role == "system" {
+            continue;
+        }
+        state
+            .db
+            .save_message(
+                &branch_session.id,
+                &message.role,
+                &message.content,
+                message.metadata.as_deref(),
+            )
+            .map_err(to_response)?;
+    }
+
+    let note_metadata = serde_json::json!({
+        "branch_root_session_id": root_session_id,
+        "branch_source_session_id": request.session_id,
+        "branch_source_message_id": request.from_message_id,
+    })
+    .to_string();
+    let branch_note = "Branch created. Continue this path with alternate decisions while preserving the original session.";
+    state
+        .db
+        .save_message(
+            &branch_session.id,
+            "assistant",
+            branch_note,
+            Some(note_metadata.as_str()),
+        )
+        .map_err(to_response)?;
+
+    state
+        .db
+        .get_session(&branch_session.id)
+        .map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_sessions(state: State<'_, AppState>) -> Result<Vec<Session>, ErrorResponse> {
     state.db.get_sessions().map_err(to_response)
 }
