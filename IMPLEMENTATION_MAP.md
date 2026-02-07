@@ -550,4 +550,18 @@ Scope:
 4. Update docs so pack consumers understand validation fields.
 
 Status:
-- Started 2026-02-07.
+- Completed 2026-02-07.
+
+### Block B: Async Race Integration Coverage (Frontend/Tauri)
+
+Objective:
+- Add targeted integration-style tests around frontend store async race paths that previously caused stale-state and stuck-stream regressions.
+
+Scope:
+1. Add frontend test harness for store-level async/event tests.
+2. Cover `loadDocuments` session-switch race (must not apply stale results).
+3. Cover `cancelResponse` safety timeout behavior across session switches.
+4. Cover `stream:done` timeout clearing to prevent false stream resets.
+
+Status:
+- Completed 2026-02-07.
