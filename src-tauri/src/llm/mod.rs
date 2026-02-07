@@ -177,6 +177,7 @@ impl OllamaClient {
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
+        let mut completed = false;
 
         while let Some(chunk) = timeout(Duration::from_secs(120), stream.next())
             .await
@@ -230,15 +231,76 @@ impl OllamaClient {
                         );
 
                         if status == "success" {
-                            return Ok(());
+                            completed = true;
+                            break;
                         }
                     }
                     Err(_) => continue,
                 }
             }
+
+            if completed {
+                break;
+            }
         }
 
-        Ok(())
+        if !completed {
+            let remaining = buffer.trim();
+            if !remaining.is_empty() {
+                if let Ok(parsed) = serde_json::from_str::<OllamaPullResponse>(remaining) {
+                    if let Some(ref err) = parsed.error {
+                        let _ = app.emit(
+                            "model:pull_progress",
+                            ModelPullProgress {
+                                status: format!("error: {}", err),
+                                total: None,
+                                completed: None,
+                            },
+                        );
+                        return Err(AppError::LlmRequest(err.clone()));
+                    }
+                    if let Some(status) = parsed.status {
+                        let _ = app.emit(
+                            "model:pull_progress",
+                            ModelPullProgress {
+                                status: status.clone(),
+                                total: parsed.total,
+                                completed: parsed.completed,
+                            },
+                        );
+                        if status == "success" {
+                            completed = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if self.pull_cancelled.load(Ordering::SeqCst) {
+            let _ = app.emit(
+                "model:pull_progress",
+                ModelPullProgress {
+                    status: "cancelled".to_string(),
+                    total: None,
+                    completed: None,
+                },
+            );
+            return Err(AppError::StreamCancelled);
+        }
+
+        if completed {
+            Ok(())
+        } else {
+            let _ = app.emit(
+                "model:pull_progress",
+                ModelPullProgress {
+                    status: "error: stream interrupted".to_string(),
+                    total: None,
+                    completed: None,
+                },
+            );
+            Err(AppError::StreamInterrupted)
+        }
     }
 
     pub fn cancel_pull(&self) {
@@ -441,7 +503,35 @@ impl OllamaClient {
                         },
                     );
                 }
+                if parsed.done {
+                    let _ = app.emit(
+                        "stream:done",
+                        StreamChunk {
+                            r#type: "done".to_string(),
+                            session_id: Some(session_id.to_string()),
+                            ..Default::default()
+                        },
+                    );
+                    done = true;
+                }
             }
+        }
+
+        if !done {
+            if let Some(flag) = &cancel {
+                if flag.load(Ordering::SeqCst) {
+                    let _ = app.emit(
+                        "stream:done",
+                        StreamChunk {
+                            r#type: "done".to_string(),
+                            session_id: Some(session_id.to_string()),
+                            ..Default::default()
+                        },
+                    );
+                    return Err(AppError::StreamCancelled);
+                }
+            }
+            return Err(AppError::StreamInterrupted);
         }
 
         Ok(full_response)
