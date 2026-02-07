@@ -2,7 +2,7 @@
 
 Updated: 2026-02-07
 Owner: Engineering
-Status: Active roadmap complete (`confidence scoring`, `planning coverage UI`, `audit report fixes`, `additional local runtimes`, `project templates`, `codebase import`, `conversation branching`, `linux builds`). Deferred-only items remain below.
+Status: Active roadmap complete (`confidence scoring`, `planning coverage UI`, `audit report fixes`, `additional local runtimes`, `project templates`, `codebase import`, `conversation branching`, `linux builds`, `release runbook/checklist hardening`). Deferred-only items remain below.
 
 ## 1) Fixed Product Constraints
 
@@ -534,7 +534,7 @@ A roadmap item is complete only when all conditions are true:
 
 ## 9) Immediate Next Action
 
-Start with **Planning Coverage UI** implementation using section 6.1 exactly as written, then progress sequentially by commit plan in section 7.
+Run release gate checks from `RELEASE_CHECKLIST.md` for each release candidate, then execute deferred items only when product scope changes.
 
 ## 10) Next Roadmap Block (Post-Merge)
 
@@ -661,3 +661,29 @@ Scope:
 
 Status:
 - Completed 2026-02-07.
+
+### Block J: Release Gate and Packaging Operations (Phase 8)
+
+Objective:
+- Make release readiness repeatable with explicit verification and smoke criteria for macOS/Linux.
+
+Scope:
+1. Add a release checklist with branch hygiene, frontend/rust verification gates, packaging gate, smoke checks, and policy checks.
+2. Include security/config spot-check commands in the same checklist.
+3. Require audit/map sync before release signoff.
+
+Status:
+- Completed 2026-02-07 (`RELEASE_CHECKLIST.md`).
+
+### Block K: Runtime Runbook and Documentation Closure (Phase 9)
+
+Objective:
+- Provide operational troubleshooting guidance and align top-level docs with the local-first/model-agnostic posture.
+
+Scope:
+1. Add runtime runbook covering dependency checks, smoke flows, and failure playbooks.
+2. Update README to link runbook/checklist and remove stale quality signaling.
+3. Sync implementation map and audit report with final roadmap closure.
+
+Status:
+- Completed 2026-02-07 (`RUNBOOK.md`, README/AUDIT updates).

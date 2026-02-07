@@ -161,3 +161,25 @@ Implemented smallest safe fixes first (highest severity first), each in an isola
   - `cargo test` passed (54 tests).
   - `cargo build` passed.
   - `npm run tauri build` passed (macOS `.app` and `.dmg` bundles produced).
+
+## Update: Phase 8/9 Operational Closure (2026-02-07)
+
+### What Was Added
+- Added `RELEASE_CHECKLIST.md` for repeatable release gates (frontend/rust checks, packaging, smoke validation, security spot checks, CI signoff).
+- Added `RUNBOOK.md` for day-2 operations and troubleshooting (runtime health, stuck stream handling, export failures, search fallback, recovery flow).
+- Updated top-level docs (`README.md`, `IMPLEMENTATION_MAP.md`) to reflect local-first, model-agnostic workflow and deferred integration scope.
+
+### Final Verification Run (This Pass)
+- `npx tsc --noEmit` -> pass
+- `npm run test` -> pass (`5/5`)
+- `npm run build` -> pass
+- `cd src-tauri && cargo fmt --check` -> pass
+- `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings` -> pass
+- `cd src-tauri && cargo test` -> pass (`62/62`)
+- `cd src-tauri && cargo build` -> pass
+- `npm run tauri build` -> pass (macOS `.app` + `.dmg` generated)
+
+### Remaining Known Risks (Current)
+1. Windows-specific config replacement semantics remain deferred (platform out of active scope).
+2. External PM integrations (GitHub/Linear/Jira/Notion sync) remain intentionally out of scope.
+3. UI-level E2E race coverage is still thinner than store-level coverage, though core race paths are now tested.
