@@ -19,8 +19,8 @@ llm:
 # Web Search Settings
 search:
   enabled: true
-  provider: duckduckgo                      # duckduckgo | searxng | none
-  tavily_api_key: ""                        # deprecated (kept for compatibility)
+  provider: duckduckgo                      # tavily | duckduckgo | searxng | none
+  tavily_api_key: ""                        # Required if using Tavily
   searxng_url: ""                           # Required if using SearXNG
   proactive: true                           # Auto-search during conversation
 
@@ -84,14 +84,14 @@ pub fn load_or_create_config() -> (AppConfig, Option<String>) {
 
     match serde_yaml::from_str::<AppConfig>(&content) {
         Ok(mut config) => {
-            let normalized = normalize_local_free_config(&mut config);
+            let normalized = normalize_local_model_config(&mut config);
             if let Err(e) = validate_config(&config) {
                 return (AppConfig::default(), Some(e.to_string()));
             }
             if normalized {
                 if let Err(err) = save_config(&config) {
                     log::warn!(
-                        "Failed to persist normalized local/free config defaults: {}",
+                        "Failed to persist normalized local-model config defaults: {}",
                         err
                     );
                 }
@@ -171,11 +171,20 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
     }
 
     let search_provider = config.search.provider.as_str();
-    if !["duckduckgo", "searxng", "none"].contains(&search_provider) {
+    if !["tavily", "duckduckgo", "searxng", "none"].contains(&search_provider) {
         return Err(ConfigError::InvalidValue(format!(
             "search.provider={}",
             config.search.provider
         )));
+    }
+
+    if config.search.enabled
+        && search_provider == "tavily"
+        && config.search.tavily_api_key.trim().is_empty()
+    {
+        return Err(ConfigError::MissingField(
+            "search.tavily_api_key".to_string(),
+        ));
     }
 
     if config.search.enabled && search_provider == "searxng" && config.search.searxng_url.is_empty()
@@ -210,7 +219,7 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
     Ok(())
 }
 
-fn normalize_local_free_config(config: &mut AppConfig) -> bool {
+fn normalize_local_model_config(config: &mut AppConfig) -> bool {
     let mut changed = false;
 
     if config.llm.provider != "ollama" {
@@ -219,15 +228,6 @@ fn normalize_local_free_config(config: &mut AppConfig) -> bool {
     }
     if config.llm.api_key.is_some() {
         config.llm.api_key = None;
-        changed = true;
-    }
-
-    if config.search.provider == "tavily" {
-        config.search.provider = "duckduckgo".to_string();
-        changed = true;
-    }
-    if !config.search.tavily_api_key.is_empty() {
-        config.search.tavily_api_key.clear();
         changed = true;
     }
 

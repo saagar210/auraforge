@@ -42,6 +42,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   // Search state
   const [searchEnabled, setSearchEnabled] = useState(true);
   const [searchProvider, setSearchProvider] = useState<SearchConfig["provider"]>("duckduckgo");
+  const [tavilyApiKey, setTavilyApiKey] = useState("");
   const [searxngUrl, setSearxngUrl] = useState("");
   const [proactive, setProactive] = useState(true);
 
@@ -61,8 +62,13 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         setMaxTokens(config.llm.max_tokens);
         setSearchEnabled(config.search.enabled);
         setSearchProvider(
-          config.search.provider === "searxng" ? "searxng" : "duckduckgo",
+          config.search.provider === "searxng"
+            ? "searxng"
+            : config.search.provider === "tavily"
+              ? "tavily"
+              : "duckduckgo",
         );
+        setTavilyApiKey(config.search.tavily_api_key);
         setSearxngUrl(config.search.searxng_url);
         setProactive(config.search.proactive);
         setIncludeConversation(config.output.include_conversation);
@@ -92,7 +98,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     const search: SearchConfig = {
       enabled: searchEnabled,
       provider: searchEnabled ? searchProvider : "none",
-      tavily_api_key: "",
+      tavily_api_key: searchEnabled && searchProvider === "tavily" ? tavilyApiKey : "",
       searxng_url: searchEnabled && searchProvider === "searxng" ? searxngUrl : "",
       proactive,
     };
@@ -200,9 +206,26 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 </label>
 
                 {searchEnabled && (
-                  <p className="mt-2 text-xs text-text-muted">
-                    Uses free providers only (DuckDuckGo or SearXNG).
-                  </p>
+                  <div className="mt-2 space-y-2">
+                    <p className="text-xs text-text-muted">
+                      Uses DuckDuckGo by default. Optional: add Tavily for stronger search quality.
+                    </p>
+                    <input
+                      type="password"
+                      value={tavilyApiKey}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setTavilyApiKey(value);
+                        if (value.trim().length > 0) {
+                          setSearchProvider("tavily");
+                        } else if (searchProvider === "tavily") {
+                          setSearchProvider("duckduckgo");
+                        }
+                      }}
+                      placeholder="Optional Tavily API key (tvly-...)"
+                      className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                    />
+                  </div>
                 )}
               </div>
 
@@ -383,10 +406,26 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                           }
                           className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
                         >
+                          <option value="tavily">Tavily</option>
                           <option value="duckduckgo">DuckDuckGo</option>
                           <option value="searxng">SearXNG</option>
                         </select>
                       </div>
+
+                      {searchProvider === "tavily" && (
+                        <div>
+                          <label className="block text-sm text-text-secondary mb-1.5">
+                            Tavily API Key
+                          </label>
+                          <input
+                            type="password"
+                            value={tavilyApiKey}
+                            onChange={(e) => setTavilyApiKey(e.target.value)}
+                            placeholder="tvly-..."
+                            className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                          />
+                        </div>
+                      )}
 
                       {searchProvider === "searxng" && (
                         <div>

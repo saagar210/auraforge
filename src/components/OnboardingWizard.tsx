@@ -59,17 +59,35 @@ export function OnboardingWizard() {
   const [diskSpace, setDiskSpace] = useState<DiskSpace | null>(null);
   const [configModel, setConfigModel] = useState<string>("");
   const [searchEnabled, setSearchEnabled] = useState(true);
-  const [searchProvider, setSearchProvider] = useState<"duckduckgo" | "searxng">("duckduckgo");
+  const [searchProvider, setSearchProvider] = useState<"tavily" | "duckduckgo" | "searxng">(
+    "duckduckgo",
+  );
+  const [tavilyKey, setTavilyKey] = useState("");
   const [searxngUrl, setSearxngUrl] = useState("");
 
   // Load config model name on mount
   useEffect(() => {
-    invoke<{ llm: { model: string }; search: { enabled: boolean; provider: string; searxng_url: string } }>(
+    invoke<{
+      llm: { model: string };
+      search: {
+        enabled: boolean;
+        provider: string;
+        tavily_api_key: string;
+        searxng_url: string;
+      };
+    }>(
       "get_config",
     ).then((config) => {
       setConfigModel(config.llm.model);
       setSearchEnabled(config.search.enabled);
-      setSearchProvider(config.search.provider === "searxng" ? "searxng" : "duckduckgo");
+      setSearchProvider(
+        config.search.provider === "searxng"
+          ? "searxng"
+          : config.search.provider === "tavily"
+            ? "tavily"
+            : "duckduckgo",
+      );
+      setTavilyKey(config.search.tavily_api_key);
       setSearxngUrl(config.search.searxng_url);
     }).catch((e) => {
       console.error("Failed to load config in onboarding:", e);
@@ -132,12 +150,12 @@ export function OnboardingWizard() {
     await updateSearchConfig({
       enabled: searchEnabled,
       provider: searchEnabled ? searchProvider : "none",
-      tavily_api_key: "",
+      tavily_api_key: searchEnabled && searchProvider === "tavily" ? tavilyKey : "",
       searxng_url: searchEnabled && searchProvider === "searxng" ? searxngUrl : "",
       proactive: true,
     });
     setWizardStep("ready");
-  }, [searchEnabled, searchProvider, searxngUrl, updateSearchConfig, setWizardStep]);
+  }, [searchEnabled, searchProvider, tavilyKey, searxngUrl, updateSearchConfig, setWizardStep]);
 
   const progressPercent =
     modelPullProgress?.total && modelPullProgress?.completed
@@ -376,8 +394,8 @@ export function OnboardingWizard() {
                 Web Search (Optional)
               </h2>
               <p className="text-sm text-text-secondary mb-4">
-                Enable web search to ground answers in current best practices. Free providers only:
-                DuckDuckGo or your own SearXNG instance.
+                Enable web search to ground answers in current best practices. Use DuckDuckGo,
+                Tavily, or your own SearXNG instance.
               </p>
 
               <div className="flex items-center justify-between mb-4">
@@ -405,14 +423,28 @@ export function OnboardingWizard() {
                     <select
                       value={searchProvider}
                       onChange={(e) =>
-                        setSearchProvider(e.target.value as "duckduckgo" | "searxng")
+                        setSearchProvider(e.target.value as "tavily" | "duckduckgo" | "searxng")
                       }
                       className="w-full mt-1.5 px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
                     >
                       <option value="duckduckgo">DuckDuckGo (Free)</option>
+                      <option value="tavily">Tavily (API Key)</option>
                       <option value="searxng">SearXNG (Self-hosted)</option>
                     </select>
                   </label>
+
+                  {searchProvider === "tavily" && (
+                    <label className="block text-sm text-text-secondary">
+                      Tavily API Key
+                      <input
+                        type="password"
+                        value={tavilyKey}
+                        onChange={(e) => setTavilyKey(e.target.value)}
+                        placeholder="tvly-..."
+                        className="w-full mt-1.5 px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                      />
+                    </label>
+                  )}
 
                   {searchProvider === "searxng" && (
                     <label className="block text-sm text-text-secondary">

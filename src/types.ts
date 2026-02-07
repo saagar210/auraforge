@@ -103,7 +103,7 @@ export interface LLMConfig {
 
 export interface SearchConfig {
   enabled: boolean;
-  provider: 'duckduckgo' | 'searxng' | 'none';
+  provider: 'tavily' | 'duckduckgo' | 'searxng' | 'none';
   tavily_api_key: string;
   searxng_url: string;
   proactive: boolean;

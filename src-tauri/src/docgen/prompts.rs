@@ -282,7 +282,7 @@ npm install [package]@[version]
 
 **Key implementation notes:**
 - [Specific pattern to use]: "Implement search as an async trait so we can swap providers"
-- [Specific crate/API details]: "Prefer free providers (DuckDuckGo or self-hosted SearXNG) and avoid requiring API keys"
+- [Specific crate/API details]: "Default to free providers; if Tavily is used, keep it optional and key-driven"
 - [Edge case to handle]: "Search timeout should be 5 seconds — don't block the conversation if search is slow"
 
 ### Prompt for Claude Code
