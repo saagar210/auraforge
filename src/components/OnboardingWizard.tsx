@@ -57,6 +57,8 @@ export function OnboardingWizard() {
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [diskSpace, setDiskSpace] = useState<DiskSpace | null>(null);
+  const [llmProvider, setLlmProvider] = useState<"ollama" | "openai_compatible">("ollama");
+  const [llmBaseUrl, setLlmBaseUrl] = useState("http://localhost:11434");
   const [configModel, setConfigModel] = useState<string>("");
   const [searchEnabled, setSearchEnabled] = useState(true);
   const [searchProvider, setSearchProvider] = useState<"tavily" | "duckduckgo" | "searxng">(
@@ -68,7 +70,7 @@ export function OnboardingWizard() {
   // Load config model name on mount
   useEffect(() => {
     invoke<{
-      llm: { model: string };
+      llm: { provider: "ollama" | "openai_compatible"; model: string; base_url: string };
       search: {
         enabled: boolean;
         provider: string;
@@ -78,6 +80,8 @@ export function OnboardingWizard() {
     }>(
       "get_config",
     ).then((config) => {
+      setLlmProvider(config.llm.provider);
+      setLlmBaseUrl(config.llm.base_url);
       setConfigModel(config.llm.model);
       setSearchEnabled(config.search.enabled);
       setSearchProvider(
@@ -163,6 +167,10 @@ export function OnboardingWizard() {
           (modelPullProgress.completed / modelPullProgress.total) * 100,
         )
       : 0;
+  const isOllamaProvider = llmProvider === "ollama";
+  const runtimeLabel = isOllamaProvider
+    ? "Ollama"
+    : "local OpenAI-compatible runtime";
 
   const formatBytes = (bytes: number) => {
     const gb = bytes / (1024 * 1024 * 1024);
@@ -221,63 +229,79 @@ export function OnboardingWizard() {
           {wizardStep === "install-ollama" && (
             <div>
               <h2 className="text-xl font-heading font-semibold text-text-primary mb-3 text-center">
-                Install Ollama
+                {isOllamaProvider ? "Install Ollama" : "Start Local Runtime"}
               </h2>
 
               {healthStatus?.ollama_connected ? (
                 <div className="flex flex-col items-center gap-3 py-4">
                   <CheckCircle className="w-10 h-10 text-status-success" />
                   <p className="text-sm text-status-success font-medium">
-                    Ollama is running
+                    {runtimeLabel} is running
                   </p>
                 </div>
               ) : (
                 <>
-                  <p className="text-sm text-text-secondary mb-4">
-                    AuraForge needs Ollama to run AI locally on your machine.
-                    Everything stays private.
-                  </p>
+                  {isOllamaProvider ? (
+                    <>
+                      <p className="text-sm text-text-secondary mb-4">
+                        AuraForge needs Ollama to run AI locally on your machine.
+                        Everything stays private.
+                      </p>
 
-                  <div className="bg-surface rounded-lg px-4 py-3 mb-4 space-y-2">
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-xs font-mono text-accent-gold mt-0.5">
-                        1
-                      </span>
-                      <span className="text-sm text-text-primary">
+                      <div className="bg-surface rounded-lg px-4 py-3 mb-4 space-y-2">
+                        <div className="flex items-start gap-2.5">
+                          <span className="text-xs font-mono text-accent-gold mt-0.5">
+                            1
+                          </span>
+                          <span className="text-sm text-text-primary">
+                            Download Ollama
+                          </span>
+                        </div>
+                        <div className="flex items-start gap-2.5">
+                          <span className="text-xs font-mono text-accent-gold mt-0.5">
+                            2
+                          </span>
+                          <span className="text-sm text-text-primary">
+                            Install and open it
+                          </span>
+                        </div>
+                        <div className="flex items-start gap-2.5">
+                          <span className="text-xs font-mono text-accent-gold mt-0.5">
+                            3
+                          </span>
+                          <span className="text-sm text-text-primary">
+                            Come back here
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleDownloadOllama}
+                        className="w-full px-4 py-2.5 bg-accent-gold text-void text-sm font-medium rounded-lg hover:bg-accent-gold/90 transition-colors cursor-pointer border-none flex items-center justify-center gap-2 mb-3"
+                      >
+                        <Download className="w-4 h-4" />
                         Download Ollama
-                      </span>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-xs font-mono text-accent-gold mt-0.5">
-                        2
-                      </span>
-                      <span className="text-sm text-text-primary">
-                        Install and open it
-                      </span>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-xs font-mono text-accent-gold mt-0.5">
-                        3
-                      </span>
-                      <span className="text-sm text-text-primary">
-                        Come back here
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={handleDownloadOllama}
-                    className="w-full px-4 py-2.5 bg-accent-gold text-void text-sm font-medium rounded-lg hover:bg-accent-gold/90 transition-colors cursor-pointer border-none flex items-center justify-center gap-2 mb-3"
-                  >
-                    <Download className="w-4 h-4" />
-                    Download Ollama
-                    <ExternalLink className="w-3 h-3" />
-                  </button>
+                        <ExternalLink className="w-3 h-3" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm text-text-secondary mb-4">
+                        Start your local OpenAI-compatible runtime, then make sure AuraForge can
+                        reach it at <span className="font-mono text-[12px]">{llmBaseUrl}</span>.
+                      </p>
+                      <div className="bg-surface rounded-lg px-4 py-3 mb-4 space-y-2 text-sm text-text-primary">
+                        <div>1. Start your local server/runtime.</div>
+                        <div>2. Confirm the models endpoint is available.</div>
+                        <div>3. Return here and click re-check.</div>
+                      </div>
+                    </>
+                  )}
 
                   <div className="flex items-center justify-center gap-2 mb-3">
                     <Loader2 className="w-3.5 h-3.5 text-accent-glow animate-spin" />
                     <span className="text-xs text-text-muted">
-                      Waiting for Ollama...
+                      Waiting for {runtimeLabel}...
                     </span>
                   </div>
 
@@ -296,7 +320,7 @@ export function OnboardingWizard() {
           {wizardStep === "download-model" && (
             <div>
               <h2 className="text-xl font-heading font-semibold text-text-primary mb-3 text-center">
-                Download AI Model
+                {isOllamaProvider ? "Download AI Model" : "Load Model in Runtime"}
               </h2>
 
               {healthStatus?.ollama_model_available ? (
@@ -306,7 +330,7 @@ export function OnboardingWizard() {
                     Model ready
                   </p>
                 </div>
-              ) : isModelPulling ? (
+              ) : isOllamaProvider && isModelPulling ? (
                 <div>
                   <p className="text-sm text-text-secondary mb-4 text-center">
                     Downloading{" "}
@@ -343,45 +367,66 @@ export function OnboardingWizard() {
                 </div>
               ) : (
                 <>
-                  <p className="text-sm text-text-secondary mb-4">
-                    AuraForge needs to download its AI model. This is a one-time
-                    download.
-                  </p>
+                  {isOllamaProvider ? (
+                    <>
+                      <p className="text-sm text-text-secondary mb-4">
+                        AuraForge needs to download its AI model. This is a one-time
+                        download.
+                      </p>
 
-                  {diskSpace && (
-                    <div
-                      className={`bg-surface rounded-lg px-4 py-3 mb-4 text-xs ${
-                        diskSpace.sufficient
-                          ? "text-text-muted"
-                          : "text-status-warning"
-                      }`}
-                    >
-                      Requires ~18 GB. You have{" "}
-                      {diskSpace.available_gb.toFixed(0)} GB available.
-                      {!diskSpace.sufficient && (
-                        <p className="mt-1 text-status-error">
-                          Not enough disk space. Free up some space and try
-                          again.
-                        </p>
+                      {diskSpace && (
+                        <div
+                          className={`bg-surface rounded-lg px-4 py-3 mb-4 text-xs ${
+                            diskSpace.sufficient
+                              ? "text-text-muted"
+                              : "text-status-warning"
+                          }`}
+                        >
+                          Requires ~18 GB. You have{" "}
+                          {diskSpace.available_gb.toFixed(0)} GB available.
+                          {!diskSpace.sufficient && (
+                            <p className="mt-1 text-status-error">
+                              Not enough disk space. Free up some space and try
+                              again.
+                            </p>
+                          )}
+                        </div>
                       )}
-                    </div>
-                  )}
 
-                  {modelPullProgress?.status.startsWith("error") && (
-                    <div className="bg-status-error/10 border border-status-error/30 rounded-lg px-4 py-3 mb-4 text-xs text-status-error">
-                      Download failed. Click below to try again &mdash; Ollama
-                      will resume where it left off.
-                    </div>
-                  )}
+                      {modelPullProgress?.status.startsWith("error") && (
+                        <div className="bg-status-error/10 border border-status-error/30 rounded-lg px-4 py-3 mb-4 text-xs text-status-error">
+                          Download failed. Click below to try again - Ollama
+                          will resume where it left off.
+                        </div>
+                      )}
 
-                  <button
-                    onClick={handlePullModel}
-                    disabled={diskSpace !== null && !diskSpace.sufficient}
-                    className="w-full px-4 py-2.5 bg-accent-gold text-void text-sm font-medium rounded-lg hover:bg-accent-gold/90 transition-colors cursor-pointer border-none disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    Download Model
-                  </button>
+                      <button
+                        onClick={handlePullModel}
+                        disabled={diskSpace !== null && !diskSpace.sufficient}
+                        className="w-full px-4 py-2.5 bg-accent-gold text-void text-sm font-medium rounded-lg hover:bg-accent-gold/90 transition-colors cursor-pointer border-none disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                        <Download className="w-4 h-4" />
+                        Download Model
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm text-text-secondary mb-4">
+                        Load model <span className="font-mono text-[12px]">{configModel}</span> in
+                        your local runtime, then re-check availability.
+                      </p>
+                      <div className="bg-surface rounded-lg px-4 py-3 mb-4 text-xs text-text-muted">
+                        AuraForge does not pull models for OpenAI-compatible runtimes. Manage
+                        models in your runtime UI/CLI.
+                      </div>
+                      <button
+                        onClick={() => checkHealth()}
+                        className="w-full px-4 py-2.5 bg-accent-gold text-void text-sm font-medium rounded-lg hover:bg-accent-gold/90 transition-colors cursor-pointer border-none"
+                      >
+                        Re-check Model Availability
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </div>

@@ -45,6 +45,14 @@ Active roadmap items are complete.
 - Deferred per current product direction.
 - Keep code changes Windows-safe where easy, but do not spend delivery time on Windows packaging/debugging.
 
+## 2.3 Decision log (2026-02-07)
+
+1. Keep GitHub/Linear/Notion/Jira export integrations deferred for now.
+- Rationale: maintain local-first reliability and avoid credential/security complexity during core hardening.
+
+2. Keep Windows packaging deferred for this phase.
+- Rationale: active runtime target is macOS + Linux, and Linux CI coverage is now in place.
+
 ## 3) Engineering Guardrails
 
 These guardrails apply to every item below:
