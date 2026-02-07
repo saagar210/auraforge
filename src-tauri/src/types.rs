@@ -168,6 +168,30 @@ pub struct QualityReport {
     pub summary: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageStatus {
+    Missing,
+    Partial,
+    Covered,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoverageTopic {
+    pub topic: String,
+    pub status: CoverageStatus,
+    pub evidence_message_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoverageReport {
+    pub must_have: Vec<CoverageTopic>,
+    pub should_have: Vec<CoverageTopic>,
+    pub missing_must_haves: usize,
+    pub missing_should_haves: usize,
+    pub summary: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfidenceFactor {
     pub name: String,

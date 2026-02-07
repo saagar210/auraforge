@@ -14,7 +14,7 @@ use crate::types::{
 
 pub use confidence::analyze_generation_confidence;
 use prompts::*;
-pub use quality::analyze_plan_readiness;
+pub use quality::{analyze_plan_readiness, analyze_planning_coverage};
 
 pub async fn generate_all_documents(
     app: &tauri::AppHandle,

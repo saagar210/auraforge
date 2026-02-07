@@ -18,6 +18,7 @@ import type {
   OnboardingStep,
   ForgeTarget,
   QualityReport,
+  CoverageReport,
   ConfidenceReport,
   GenerationMetadata,
 } from "../types";
@@ -49,6 +50,7 @@ interface ChatState {
   showPreview: boolean;
   forgeTarget: ForgeTarget;
   planReadiness: QualityReport | null;
+  planningCoverage: CoverageReport | null;
   generationConfidence: ConfidenceReport | null;
   generationMetadata: GenerationMetadata | null;
 
@@ -111,6 +113,7 @@ interface ChatState {
   // Document actions
   setForgeTarget: (target: ForgeTarget) => void;
   analyzePlanReadiness: () => Promise<QualityReport | null>;
+  getPlanningCoverage: () => Promise<CoverageReport | null>;
   getGenerationConfidence: () => Promise<ConfidenceReport | null>;
   generateDocuments: (options?: {
     target?: ForgeTarget;
@@ -191,6 +194,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   showPreview: false,
   forgeTarget: "generic",
   planReadiness: null,
+  planningCoverage: null,
   generationConfidence: null,
   generationMetadata: null,
   toast: null,
@@ -267,6 +271,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         searchQuery: null,
         searchResults: null,
       });
+      void get().getPlanningCoverage();
     } catch (e) {
       if (get().currentSessionId === currentSessionId) {
         set({
@@ -305,6 +310,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         showPreview: false,
         documentsStale: false,
         planReadiness: null,
+        planningCoverage: null,
         generationConfidence: null,
         generationMetadata: null,
       }));
@@ -330,6 +336,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       showPreview: false,
       documentsStale: false,
       planReadiness: null,
+      planningCoverage: null,
       generationConfidence: null,
       generationMetadata: null,
     });
@@ -341,6 +348,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       // Load cached documents if any
       get().loadDocuments();
+      void get().getPlanningCoverage();
     } catch (e) {
       console.error("Failed to load messages:", e);
       set({ messagesLoading: false });
@@ -366,6 +374,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           showPreview: state.currentSessionId === sessionId ? false : state.showPreview,
           planReadiness:
             state.currentSessionId === sessionId ? null : state.planReadiness,
+          planningCoverage:
+            state.currentSessionId === sessionId ? null : state.planningCoverage,
           generationConfidence:
             state.currentSessionId === sessionId ? null : state.generationConfidence,
           generationMetadata:
@@ -401,6 +411,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           documents: activeDeleted ? [] : state.documents,
           showPreview: activeDeleted ? false : state.showPreview,
           planReadiness: activeDeleted ? null : state.planReadiness,
+          planningCoverage: activeDeleted ? null : state.planningCoverage,
           generationConfidence: activeDeleted ? null : state.generationConfidence,
           generationMetadata: activeDeleted ? null : state.generationMetadata,
         };
@@ -479,6 +490,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
 
       get().loadSessions();
+      void get().getPlanningCoverage();
     } catch (e) {
       // Only set error if we're still on the same session
       if (get().currentSessionId === sessionId) {
@@ -657,6 +669,24 @@ export const useChatStore = create<ChatState>((set, get) => {
       return report;
     } catch (e) {
       console.error("Failed to analyze readiness:", e);
+      return null;
+    }
+  },
+
+  getPlanningCoverage: async () => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return null;
+
+    try {
+      const report = await invoke<CoverageReport>("get_planning_coverage", {
+        session_id: sessionId,
+      });
+      if (get().currentSessionId === sessionId) {
+        set({ planningCoverage: report });
+      }
+      return report;
+    } catch (e) {
+      console.error("Failed to load planning coverage:", e);
       return null;
     }
   },

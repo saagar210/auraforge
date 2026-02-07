@@ -272,7 +272,7 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 ### Next
 
 - [x] Confidence scoring — post-generation assessment of document completeness
-- [ ] Planning coverage UI — sidebar indicator tracking topic coverage during conversation
+- [x] Planning coverage UI — sidebar indicator tracking topic coverage during conversation
 - [ ] Audit report fixes — structured error handling (`AppError`), transaction safety, CSP hardening (see AUDIT_REPORT.md)
 
 ### Future

@@ -2,7 +2,7 @@
 
 Updated: 2026-02-07
 Owner: Engineering
-Status: Step 1 complete (`confidence scoring`), remaining items planned below
+Status: Steps complete (`confidence scoring`, `planning coverage UI`), remaining items planned below
 
 ## 1) Fixed Product Constraints
 
@@ -33,16 +33,15 @@ These constraints are mandatory for all remaining work:
 
 ## 2.1 Active roadmap items
 
-1. Planning coverage UI
-2. Audit report fixes
+1. Audit report fixes
 - structured `AppError`
 - transaction safety
 - CSP hardening
-3. Additional local model runtimes (LM Studio / OpenAI-compatible local endpoints)
-4. Project templates for common app types
-5. Import existing codebases for refactoring plans
-6. Conversation branching
-7. Linux build/release hardening (Windows deferred)
+2. Additional local model runtimes (LM Studio / OpenAI-compatible local endpoints)
+3. Project templates for common app types
+4. Import existing codebases for refactoring plans
+5. Conversation branching
+6. Linux build/release hardening (Windows deferred)
 
 ## 2.2 Explicitly deferred
 

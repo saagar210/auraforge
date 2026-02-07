@@ -726,6 +726,14 @@ pub async fn analyze_plan_readiness(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn get_planning_coverage(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<CoverageReport, ErrorResponse> {
+    analyze_planning_coverage_internal(&state, &session_id)
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_generation_metadata(
     state: State<'_, AppState>,
     session_id: String,
@@ -1000,6 +1008,14 @@ fn analyze_plan_readiness_internal(
 ) -> Result<QualityReport, ErrorResponse> {
     let messages = state.db.get_messages(session_id).map_err(to_response)?;
     Ok(docgen::analyze_plan_readiness(&messages))
+}
+
+fn analyze_planning_coverage_internal(
+    state: &State<'_, AppState>,
+    session_id: &str,
+) -> Result<CoverageReport, ErrorResponse> {
+    let messages = state.db.get_messages(session_id).map_err(to_response)?;
+    Ok(docgen::analyze_planning_coverage(&messages))
 }
 
 fn resolve_forge_target(

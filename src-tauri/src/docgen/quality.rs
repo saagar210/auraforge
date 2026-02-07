@@ -1,4 +1,6 @@
-use crate::types::{Message, QualityReport};
+use std::collections::HashSet;
+
+use crate::types::{CoverageReport, CoverageStatus, CoverageTopic, Message, QualityReport};
 
 const MUST_HAVE_TOPICS: &[(&str, &[&str])] = &[
     (
@@ -68,15 +70,19 @@ const SHOULD_HAVE_TOPICS: &[(&str, &[&str])] = &[
 ];
 
 pub fn analyze_plan_readiness(messages: &[Message]) -> QualityReport {
-    let corpus = messages
+    let coverage = analyze_planning_coverage(messages);
+    let missing_must_haves = coverage
+        .must_have
         .iter()
-        .filter(|m| m.role != "system")
-        .map(|m| m.content.to_ascii_lowercase())
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let missing_must_haves = missing_topics(MUST_HAVE_TOPICS, &corpus);
-    let missing_should_haves = missing_topics(SHOULD_HAVE_TOPICS, &corpus);
+        .filter(|topic| topic.status == CoverageStatus::Missing)
+        .map(|topic| topic.topic.clone())
+        .collect::<Vec<_>>();
+    let missing_should_haves = coverage
+        .should_have
+        .iter()
+        .filter(|topic| topic.status == CoverageStatus::Missing)
+        .map(|topic| topic.topic.clone())
+        .collect::<Vec<_>>();
 
     let mut score = 100i32;
     score -= (missing_must_haves.len() as i32) * 14;
@@ -105,11 +111,83 @@ pub fn analyze_plan_readiness(messages: &[Message]) -> QualityReport {
     }
 }
 
-fn missing_topics(topics: &[(&str, &[&str])], corpus: &str) -> Vec<String> {
+pub fn analyze_planning_coverage(messages: &[Message]) -> CoverageReport {
+    let non_system_messages = messages
+        .iter()
+        .filter(|message| message.role != "system")
+        .collect::<Vec<_>>();
+
+    let must_have = evaluate_topics(MUST_HAVE_TOPICS, &non_system_messages);
+    let should_have = evaluate_topics(SHOULD_HAVE_TOPICS, &non_system_messages);
+    let missing_must_haves = must_have
+        .iter()
+        .filter(|topic| topic.status == CoverageStatus::Missing)
+        .count();
+    let missing_should_haves = should_have
+        .iter()
+        .filter(|topic| topic.status == CoverageStatus::Missing)
+        .count();
+
+    let summary = if missing_must_haves == 0 && missing_should_haves == 0 {
+        "Coverage is complete across must-have and should-have planning topics.".to_string()
+    } else if missing_must_haves == 0 {
+        format!(
+            "Must-have coverage is complete. {} should-have topic(s) are still thin.",
+            missing_should_haves
+        )
+    } else {
+        format!(
+            "{} must-have topic(s) still need clarification before high-confidence forge.",
+            missing_must_haves
+        )
+    };
+
+    CoverageReport {
+        must_have,
+        should_have,
+        missing_must_haves,
+        missing_should_haves,
+        summary,
+    }
+}
+
+fn evaluate_topics(topics: &[(&str, &[&str])], messages: &[&Message]) -> Vec<CoverageTopic> {
     topics
         .iter()
-        .filter(|(_, keywords)| !keywords.iter().any(|keyword| corpus.contains(keyword)))
-        .map(|(topic, _)| (*topic).to_string())
+        .map(|(topic, keywords)| {
+            let mut evidence_message_ids = Vec::new();
+            let mut matched_keywords = HashSet::new();
+
+            for message in messages {
+                let content = message.content.to_ascii_lowercase();
+                let mut matched_this_message = false;
+
+                for keyword in *keywords {
+                    if content.contains(keyword) {
+                        matched_keywords.insert(*keyword);
+                        matched_this_message = true;
+                    }
+                }
+
+                if matched_this_message && evidence_message_ids.len() < 4 {
+                    evidence_message_ids.push(message.id.clone());
+                }
+            }
+
+            let status = if matched_keywords.is_empty() {
+                CoverageStatus::Missing
+            } else if matched_keywords.len() >= 2 && evidence_message_ids.len() >= 2 {
+                CoverageStatus::Covered
+            } else {
+                CoverageStatus::Partial
+            };
+
+            CoverageTopic {
+                topic: (*topic).to_string(),
+                status,
+                evidence_message_ids,
+            }
+        })
         .collect()
 }
 
@@ -151,5 +229,41 @@ mod tests {
         )]);
         assert!(report.score >= 90);
         assert!(report.missing_must_haves.is_empty());
+    }
+
+    #[test]
+    fn planning_coverage_marks_partial_when_single_mention() {
+        let coverage = analyze_planning_coverage(&[message(
+            "user",
+            "The problem is onboarding friction and our goal is to ship quickly.",
+        )]);
+        let topic = coverage
+            .must_have
+            .iter()
+            .find(|topic| topic.topic == "Problem statement / why this exists")
+            .expect("topic should exist");
+        assert_eq!(topic.status, CoverageStatus::Partial);
+        assert_eq!(coverage.missing_must_haves, 4);
+    }
+
+    #[test]
+    fn planning_coverage_marks_covered_with_multiple_evidence() {
+        let coverage = analyze_planning_coverage(&[
+            message(
+                "user",
+                "The core user flow starts with sign in, then workflow setup.",
+            ),
+            message(
+                "assistant",
+                "Great, this step-by-step user journey is clear with each screen.",
+            ),
+        ]);
+        let topic = coverage
+            .must_have
+            .iter()
+            .find(|topic| topic.topic == "Core user flow (step-by-step)")
+            .expect("topic should exist");
+        assert_eq!(topic.status, CoverageStatus::Covered);
+        assert!(!topic.evidence_message_ids.is_empty());
     }
 }

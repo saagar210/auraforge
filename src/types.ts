@@ -128,6 +128,22 @@ export interface QualityReport {
   summary: string;
 }
 
+export type CoverageStatus = 'missing' | 'partial' | 'covered';
+
+export interface CoverageTopic {
+  topic: string;
+  status: CoverageStatus;
+  evidence_message_ids: string[];
+}
+
+export interface CoverageReport {
+  must_have: CoverageTopic[];
+  should_have: CoverageTopic[];
+  missing_must_haves: number;
+  missing_should_haves: number;
+  summary: string;
+}
+
 export interface ConfidenceFactor {
   name: string;
   max_points: number;
