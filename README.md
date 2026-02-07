@@ -219,10 +219,11 @@ my-project-plan/
 ├── CLAUDE.md           # Project context for Claude Code
 ├── PROMPTS.md          # Phased implementation prompts
 ├── MODEL_HANDOFF.md    # Target-specific model handoff
-└── CONVERSATION.md     # Full planning transcript
+├── CONVERSATION.md     # Full planning transcript
+└── manifest.json       # Export metadata + file checksums
 ```
 
-Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to lowercase alphanumeric + hyphens (max 60 characters). AuraForge checks for existing folders (won't overwrite), verifies disk space (20 GB threshold), and handles permission errors with specific messages.
+Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to lowercase alphanumeric + hyphens (max 60 characters). AuraForge checks for existing folders (won't overwrite), verifies disk space (20 GB threshold), and handles permission errors with specific messages. `manifest.json` includes deterministic file metadata (`filename`, `bytes`, `lines`, `sha256`) to make handoff packs verifiable across coding models.
 
 ---
 

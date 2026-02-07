@@ -1,4 +1,5 @@
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::{Emitter, State};
@@ -115,6 +116,16 @@ If the user seems stuck or unsure what to discuss next, suggest the next uncover
 - Accept vague answers without pushing for specifics
 - Propagate typos or unclear terms without clarifying
 - Rush to architecture before understanding the problem"##;
+
+const EXPORT_FILE_ORDER: &[&str] = &[
+    "START_HERE.md",
+    "README.md",
+    "SPEC.md",
+    "CLAUDE.md",
+    "PROMPTS.md",
+    "MODEL_HANDOFF.md",
+    "CONVERSATION.md",
+];
 
 fn to_response<E: Into<AppError>>(err: E) -> ErrorResponse {
     err.into().to_response()
@@ -1072,6 +1083,7 @@ pub async fn save_to_folder(
         }
 
         let manifest = ExportManifest {
+            schema_version: 2,
             session_id: session_id_for_thread.clone(),
             session_name: session_name_for_thread.clone(),
             target: meta_for_thread
@@ -1096,10 +1108,7 @@ pub async fn save_to_folder(
                 .and_then(|m| m.confidence_json.as_ref())
                 .and_then(|q| serde_json::from_str::<ConfidenceReport>(q).ok()),
             import_context: import_context_for_thread.clone(),
-            files: docs_for_thread
-                .iter()
-                .map(|doc| doc.filename.clone())
-                .collect(),
+            files: build_export_manifest_files(&docs_for_thread),
         };
         let manifest_json =
             serde_json::to_string_pretty(&manifest).map_err(|e| AppError::FileSystem {
@@ -1229,6 +1238,7 @@ fn resolve_forge_target(
 
 #[derive(Debug, Clone, Serialize)]
 struct ExportManifest {
+    schema_version: u32,
     session_id: String,
     session_name: String,
     target: String,
@@ -1238,10 +1248,58 @@ struct ExportManifest {
     quality: Option<QualityReport>,
     confidence: Option<ConfidenceReport>,
     import_context: Option<CodebaseImportSummary>,
-    files: Vec<String>,
+    files: Vec<ExportManifestFile>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportManifestFile {
+    filename: String,
+    bytes: usize,
+    lines: usize,
+    sha256: String,
 }
 
 // ============ HELPERS ============
+
+fn build_export_manifest_files(docs: &[GeneratedDocument]) -> Vec<ExportManifestFile> {
+    let mut files: Vec<ExportManifestFile> = docs
+        .iter()
+        .map(|doc| ExportManifestFile {
+            filename: doc.filename.clone(),
+            bytes: doc.content.len(),
+            lines: if doc.content.is_empty() {
+                0
+            } else {
+                doc.content.lines().count()
+            },
+            sha256: sha256_hex(doc.content.as_bytes()),
+        })
+        .collect();
+
+    files.sort_by(|a, b| {
+        let rank_a = export_file_rank(&a.filename);
+        let rank_b = export_file_rank(&b.filename);
+        rank_a
+            .cmp(&rank_b)
+            .then_with(|| a.filename.cmp(&b.filename))
+    });
+
+    files
+}
+
+fn export_file_rank(filename: &str) -> usize {
+    EXPORT_FILE_ORDER
+        .iter()
+        .position(|known| known == &filename)
+        .unwrap_or(EXPORT_FILE_ORDER.len())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    digest.iter().map(|b| format!("{:02x}", b)).collect()
+}
 
 fn extract_import_summary_from_metadata(metadata: &str) -> Option<CodebaseImportSummary> {
     let value = serde_json::from_str::<serde_json::Value>(metadata).ok()?;
@@ -1270,4 +1328,66 @@ fn build_search_context(query: &str, results: &[SearchResult]) -> String {
     );
 
     context
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn doc(filename: &str, content: &str) -> GeneratedDocument {
+        GeneratedDocument {
+            id: "doc-id".to_string(),
+            session_id: "session-id".to_string(),
+            filename: filename.to_string(),
+            content: content.to_string(),
+            created_at: "2026-01-01 00:00:00".to_string(),
+        }
+    }
+
+    #[test]
+    fn build_export_manifest_files_orders_known_documents_first() {
+        let files = build_export_manifest_files(&[
+            doc("Z_NOTES.md", "notes"),
+            doc("README.md", "read me"),
+            doc("START_HERE.md", "start here"),
+            doc("A_CUSTOM.md", "custom"),
+        ]);
+
+        let ordered_names: Vec<String> = files.into_iter().map(|f| f.filename).collect();
+        assert_eq!(
+            ordered_names,
+            vec![
+                "START_HERE.md".to_string(),
+                "README.md".to_string(),
+                "A_CUSTOM.md".to_string(),
+                "Z_NOTES.md".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_export_manifest_files_includes_hash_bytes_and_lines() {
+        let files = build_export_manifest_files(&[doc("SPEC.md", "abc"), doc("EMPTY.md", "")]);
+        let spec = files
+            .iter()
+            .find(|f| f.filename == "SPEC.md")
+            .expect("SPEC.md entry missing");
+        assert_eq!(spec.bytes, 3);
+        assert_eq!(spec.lines, 1);
+        assert_eq!(
+            spec.sha256,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+
+        let empty = files
+            .iter()
+            .find(|f| f.filename == "EMPTY.md")
+            .expect("EMPTY.md entry missing");
+        assert_eq!(empty.bytes, 0);
+        assert_eq!(empty.lines, 0);
+        assert_eq!(
+            empty.sha256,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
 }
