@@ -552,6 +552,21 @@ Scope:
 Status:
 - Completed 2026-02-07.
 
+### Block D: Filesystem and Persistence Robustness (Phase 2)
+
+Objective:
+- Prevent path traversal/partial-write edge cases and improve config durability guarantees.
+
+Scope:
+1. Add destination preflight checks for export folder existence/type/readonly state.
+2. Validate export filenames to reject nested/absolute/blank paths before writing files.
+3. Continue atomic export behavior with sanitized write inputs and deterministic manifest output.
+4. Harden config persistence using atomic write helper with parent-directory fsync and temp cleanup on rename failure.
+5. Add regression tests for export filename validation and atomic config replacement.
+
+Status:
+- Completed 2026-02-07.
+
 ### Block C: Security and Runtime Hardening (Phase 1)
 
 Objective:
