@@ -446,8 +446,8 @@ pub async fn send_message(
             .rev()
             .find(|m| m.role == "user")
             .ok_or_else(|| {
-                to_response(AppError::Unknown(
-                    "No user message found to retry".to_string(),
+                to_response(AppError::Validation(
+                    "No prior user message exists for retry in this session.".to_string(),
                 ))
             })?;
         // Remove the old assistant response to avoid duplicates
@@ -651,7 +651,7 @@ pub async fn generate_documents(
     let quality = analyze_plan_readiness_internal(&state, &request.session_id)?;
 
     if !request.force.unwrap_or(false) && !quality.missing_must_haves.is_empty() {
-        return Err(to_response(AppError::Config(format!(
+        return Err(to_response(AppError::Validation(format!(
             "Readiness check has missing must-haves: {}. Continue with force=true to forge anyway.",
             quality.missing_must_haves.join(", ")
         ))));
@@ -1024,7 +1024,7 @@ fn resolve_forge_target(
 ) -> Result<ForgeTarget, ErrorResponse> {
     let candidate = target.unwrap_or(config.output.default_target.as_str());
     candidate.parse::<ForgeTarget>().map_err(|e| {
-        to_response(AppError::Config(format!(
+        to_response(AppError::Validation(format!(
             "Invalid forge target '{}': {}",
             candidate, e
         )))

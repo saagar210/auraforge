@@ -45,8 +45,8 @@ pub enum AppError {
     FileSystem { path: String, message: String },
     #[error("Folder already exists: {0}")]
     FolderExists(String),
-    #[error("Unknown error: {0}")]
-    Unknown(String),
+    #[error("Invalid request: {0}")]
+    Validation(String),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,7 +82,7 @@ impl AppError {
             AppError::Config(_) => "config_error",
             AppError::FileSystem { .. } => "filesystem_error",
             AppError::FolderExists(_) => "folder_exists",
-            AppError::Unknown(_) => "unknown",
+            AppError::Validation(_) => "validation_error",
         }
     }
 
@@ -101,7 +101,7 @@ impl AppError {
             | AppError::SessionNotFound(_)
             | AppError::FolderExists(_)
             | AppError::TavilyError(_)
-            | AppError::Unknown(_) => false,
+            | AppError::Validation(_) => false,
         }
     }
 
@@ -112,6 +112,7 @@ impl AppError {
             AppError::SearchRateLimit => Some("Switch to DuckDuckGo or try later".to_string()),
             AppError::FileSystem { .. } => Some("Choose another folder".to_string()),
             AppError::FolderExists(_) => Some("Choose a different folder name".to_string()),
+            AppError::Validation(_) => Some("Review the request and try again".to_string()),
             _ => None,
         }
     }

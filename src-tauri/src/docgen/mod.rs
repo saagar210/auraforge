@@ -26,7 +26,7 @@ pub async fn generate_all_documents(
 
     let user_msgs = messages.iter().any(|m| m.role == "user");
     if !user_msgs {
-        return Err(AppError::Unknown(
+        return Err(AppError::Validation(
             "Cannot generate documents from an empty conversation".to_string(),
         ));
     }
