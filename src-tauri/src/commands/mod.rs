@@ -318,7 +318,7 @@ pub async fn check_disk_space() -> Result<DiskSpace, ErrorResponse> {
             let ret = unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) };
             if ret == 0 {
                 let stat = unsafe { stat.assume_init() };
-                let available_bytes = stat.f_bavail as u64 * stat.f_frsize;
+                let available_bytes = u64::from(stat.f_bavail).saturating_mul(stat.f_frsize);
                 let available_gb = available_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
                 return Ok(DiskSpace {
                     available_gb,
