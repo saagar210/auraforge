@@ -9,18 +9,18 @@ const DEFAULT_CONFIG_YAML: &str = r#"# AuraForge Configuration
 
 # LLM Provider Settings
 llm:
-  provider: ollama                          # ollama | anthropic | openai
+  provider: ollama                          # local-only
   model: qwen3-coder:30b-a3b-instruct-q4_K_M
   base_url: http://localhost:11434          # Ollama default
-  api_key: ""                               # Optional for remote providers
+  api_key: ""                               # unused in local-only mode
   temperature: 0.7
   max_tokens: 65536
 
 # Web Search Settings
 search:
   enabled: true
-  provider: duckduckgo                      # tavily | duckduckgo | searxng | none
-  tavily_api_key: ""                        # Required if using Tavily
+  provider: duckduckgo                      # duckduckgo | searxng | none
+  tavily_api_key: ""                        # deprecated (kept for compatibility)
   searxng_url: ""                           # Required if using SearXNG
   proactive: true                           # Auto-search during conversation
 
@@ -83,9 +83,18 @@ pub fn load_or_create_config() -> (AppConfig, Option<String>) {
     };
 
     match serde_yaml::from_str::<AppConfig>(&content) {
-        Ok(config) => {
+        Ok(mut config) => {
+            let normalized = normalize_local_free_config(&mut config);
             if let Err(e) = validate_config(&config) {
                 return (AppConfig::default(), Some(e.to_string()));
+            }
+            if normalized {
+                if let Err(err) = save_config(&config) {
+                    log::warn!(
+                        "Failed to persist normalized local/free config defaults: {}",
+                        err
+                    );
+                }
             }
             (config, None)
         }
@@ -136,9 +145,9 @@ pub fn save_config(config: &AppConfig) -> Result<(), String> {
 
 fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
     let llm_provider = config.llm.provider.as_str();
-    if !["ollama", "anthropic", "openai"].contains(&llm_provider) {
+    if llm_provider != "ollama" {
         return Err(ConfigError::InvalidValue(format!(
-            "llm.provider={}",
+            "llm.provider={} (local-only mode requires 'ollama')",
             config.llm.provider
         )));
     }
@@ -162,20 +171,11 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
     }
 
     let search_provider = config.search.provider.as_str();
-    if !["tavily", "duckduckgo", "searxng", "none"].contains(&search_provider) {
+    if !["duckduckgo", "searxng", "none"].contains(&search_provider) {
         return Err(ConfigError::InvalidValue(format!(
             "search.provider={}",
             config.search.provider
         )));
-    }
-
-    if config.search.enabled
-        && search_provider == "tavily"
-        && config.search.tavily_api_key.is_empty()
-    {
-        return Err(ConfigError::MissingField(
-            "search.tavily_api_key".to_string(),
-        ));
     }
 
     if config.search.enabled && search_provider == "searxng" && config.search.searxng_url.is_empty()
@@ -208,4 +208,28 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
     }
 
     Ok(())
+}
+
+fn normalize_local_free_config(config: &mut AppConfig) -> bool {
+    let mut changed = false;
+
+    if config.llm.provider != "ollama" {
+        config.llm.provider = "ollama".to_string();
+        changed = true;
+    }
+    if config.llm.api_key.is_some() {
+        config.llm.api_key = None;
+        changed = true;
+    }
+
+    if config.search.provider == "tavily" {
+        config.search.provider = "duckduckgo".to_string();
+        changed = true;
+    }
+    if !config.search.tavily_api_key.is_empty() {
+        config.search.tavily_api_key.clear();
+        changed = true;
+    }
+
+    changed
 }

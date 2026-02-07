@@ -34,17 +34,14 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // LLM state
-  const [llmProvider, setLlmProvider] = useState("ollama");
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
-  const [llmApiKey, setLlmApiKey] = useState("");
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(65536);
 
   // Search state
   const [searchEnabled, setSearchEnabled] = useState(true);
-  const [searchProvider, setSearchProvider] = useState("tavily");
-  const [tavilyApiKey, setTavilyApiKey] = useState("");
+  const [searchProvider, setSearchProvider] = useState<SearchConfig["provider"]>("duckduckgo");
   const [searxngUrl, setSearxngUrl] = useState("");
   const [proactive, setProactive] = useState(true);
 
@@ -58,15 +55,14 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     if (open) {
       loadConfig().then((config: AppConfig | null) => {
         if (!config) return;
-        setLlmProvider(config.llm.provider);
         setModel(config.llm.model);
         setBaseUrl(config.llm.base_url);
-        setLlmApiKey(config.llm.api_key ?? "");
         setTemperature(config.llm.temperature);
         setMaxTokens(config.llm.max_tokens);
         setSearchEnabled(config.search.enabled);
-        setSearchProvider(config.search.provider);
-        setTavilyApiKey(config.search.tavily_api_key);
+        setSearchProvider(
+          config.search.provider === "searxng" ? "searxng" : "duckduckgo",
+        );
         setSearxngUrl(config.search.searxng_url);
         setProactive(config.search.proactive);
         setIncludeConversation(config.output.include_conversation);
@@ -85,19 +81,19 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     setSaving(true);
 
     const llm: LLMConfig = {
-      provider: llmProvider as LLMConfig["provider"],
+      provider: "ollama",
       model,
       base_url: baseUrl,
-      api_key: llmApiKey,
+      api_key: null,
       temperature,
       max_tokens: maxTokens,
     };
 
     const search: SearchConfig = {
       enabled: searchEnabled,
-      provider: searchProvider as SearchConfig["provider"],
-      tavily_api_key: tavilyApiKey,
-      searxng_url: searxngUrl,
+      provider: searchEnabled ? searchProvider : "none",
+      tavily_api_key: "",
+      searxng_url: searchEnabled && searchProvider === "searxng" ? searxngUrl : "",
       proactive,
     };
 
@@ -117,7 +113,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       setSaveError(null);
       onClose();
     } else {
-      setSaveError("Invalid settings. Check your provider, API keys, and URLs.");
+      setSaveError("Invalid settings. Check your model and search configuration.");
     }
   };
 
@@ -203,29 +199,10 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   />
                 </label>
 
-                {searchEnabled && !tavilyApiKey && (
-                  <div className="mt-2 text-xs text-text-muted">
-                    Using basic search. For better results, add a{" "}
-                    <a
-                      href="https://tavily.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-accent-glow hover:text-accent-gold underline"
-                    >
-                      Tavily API key
-                    </a>{" "}
-                    (free):
-                    <input
-                      type="password"
-                      value={tavilyApiKey}
-                      onChange={(e) => {
-                        setTavilyApiKey(e.target.value);
-                        if (e.target.value) setSearchProvider("tavily");
-                      }}
-                      placeholder="tvly-..."
-                      className="w-full mt-1.5 px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
-                    />
-                  </div>
+                {searchEnabled && (
+                  <p className="mt-2 text-xs text-text-muted">
+                    Uses free providers only (DuckDuckGo or SearXNG).
+                  </p>
                 )}
               </div>
 
@@ -310,20 +287,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                     Language Model
                   </h3>
 
-                  <div>
-                    <label className="block text-sm text-text-secondary mb-1.5">
-                      Provider
-                    </label>
-                    <select
-                      value={llmProvider}
-                      onChange={(e) => setLlmProvider(e.target.value)}
-                      className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
-                    >
-                      <option value="ollama">Ollama (Local)</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="openai">OpenAI</option>
-                    </select>
-                  </div>
+                  <p className="text-xs text-text-muted">
+                    Local-only mode is enabled. AuraForge uses Ollama running on your machine.
+                  </p>
 
                   <div>
                     <label className="block text-sm text-text-secondary mb-1.5">
@@ -350,21 +316,6 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                       className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
                     />
                   </div>
-
-                  {llmProvider !== "ollama" && (
-                    <div>
-                      <label className="block text-sm text-text-secondary mb-1.5">
-                        API Key
-                      </label>
-                      <input
-                        type="password"
-                        value={llmApiKey}
-                        onChange={(e) => setLlmApiKey(e.target.value)}
-                        placeholder="Provider API key"
-                        className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
-                      />
-                    </div>
-                  )}
 
                   <div>
                     <label className="flex items-center justify-between text-sm text-text-secondary mb-1.5">
@@ -427,29 +378,15 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                         </label>
                         <select
                           value={searchProvider}
-                          onChange={(e) => setSearchProvider(e.target.value)}
+                          onChange={(e) =>
+                            setSearchProvider(e.target.value as SearchConfig["provider"])
+                          }
                           className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
                         >
-                          <option value="tavily">Tavily</option>
                           <option value="duckduckgo">DuckDuckGo</option>
                           <option value="searxng">SearXNG</option>
                         </select>
                       </div>
-
-                      {searchProvider === "tavily" && (
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1.5">
-                            Tavily API Key
-                          </label>
-                          <input
-                            type="password"
-                            value={tavilyApiKey}
-                            onChange={(e) => setTavilyApiKey(e.target.value)}
-                            placeholder="tvly-..."
-                            className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
-                          />
-                        </div>
-                      )}
 
                       {searchProvider === "searxng" && (
                         <div>

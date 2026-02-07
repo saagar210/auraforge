@@ -84,7 +84,7 @@ Documents are generated sequentially with cross-referencing — each document re
 Natural dialogue powered by Ollama's local LLM inference. Responses stream token-by-token via NDJSON parsing with `requestAnimationFrame`-batched rendering to prevent excessive re-renders. Cancel mid-stream with an `AtomicBool` flag checked per chunk. Retry any response — the old assistant message is deleted from the database before streaming the replacement. v0.2.0 conversations go deeper — AuraForge limits itself to two questions per turn, finishes one topic before moving to the next, and pushes back on vague answers before allowing generation.
 
 ### Grounded in Reality via Web Search
-Three search providers with automatic failover: **DuckDuckGo** (free, HTML scraping with multi-selector fallback), **Tavily** (API-based, higher quality), and **SearXNG** (self-hosted). Search triggers automatically when the conversation involves technical topics — detected by matching against 46 technology keywords and 25 trigger patterns. Results are injected as system context so the LLM can reference current versions, best practices, and real-world trade-offs.
+Free search providers with automatic failover: **DuckDuckGo** (free, HTML scraping with multi-selector fallback) and **SearXNG** (self-hosted). Search triggers automatically when the conversation involves technical topics — detected by matching against 46 technology keywords and 25 trigger patterns. Results are injected as system context so the LLM can reference current versions, best practices, and real-world trade-offs.
 
 ### Multi-Document Generation with Cross-Referencing
 Sequential generation in dependency order: SPEC → CLAUDE → PROMPTS → README → START_HERE. Each document receives all previously generated documents as context, enabling cross-referencing (e.g., PROMPTS.md references exact conventions from CLAUDE.md, START_HERE.md generates setup steps matching the actual tech stack). Documents use `[TBD — not discussed during planning]` markers for undiscussed topics instead of inventing content. Output validation retries once if a document doesn't start with a proper heading (`#`). Documents are stored atomically — old versions are deleted and new ones inserted in a single database transaction. Staleness detection compares the latest message timestamp against document generation time.
@@ -93,7 +93,7 @@ Sequential generation in dependency order: SPEC → CLAUDE → PROMPTS → READM
 When you trigger document generation, AuraForge assesses conversation coverage across key planning topics: problem statement, user flow, tech stack, data model, and scope boundaries. If gaps exist, it reports them and asks for explicit confirmation before forcing generation with `[TBD]` markers. This prevents accidental exports of incomplete plans.
 
 ### Local-First and Private
-All data stays on your machine. Conversations live in a local SQLite database with WAL mode. Config is stored as YAML in `~/.auraforge/`. The only network calls are to your local Ollama instance and (optionally) web search providers. No telemetry, no cloud sync, no API keys required to get started.
+All data stays on your machine. Conversations live in a local SQLite database with WAL mode. Config is stored as YAML in `~/.auraforge/`. The only network calls are to your local Ollama instance and (optionally) web search providers. No telemetry, no cloud sync, and no paid model APIs required.
 
 ### Resilient Data Layer
 SQLite with WAL mode, foreign key cascades, and automatic schema migrations. Config writes are atomic (write to temp file, `fsync`, rename). If the config file corrupts, AuraForge backs it up and recreates valid defaults. If the database corrupts, it backs it up and falls back to an in-memory database so the app stays functional. Mutex poisoning is recovered via `unwrap_or_else(|e| e.into_inner())`.
@@ -128,7 +128,7 @@ A dark, atmospheric UI built around the metaphor of crafting. Ember particles dr
 │  │  - Onboarding   │   │             ▼      ▼              │
 │  │  - Settings     │   │        ┌───────┐┌──────────────┐  │
 │  │  - ForgeButton  │   │        │Ollama ││DuckDuckGo    │  │
-│  └────────────────┘   │        │(local)││Tavily / Searx│  │
+│  └────────────────┘   │        │(local)││/ SearXNG     │  │
 │                       │        └───────┘└──────────────┘  │
 └───────────────────────┴────────────────────────────────────┘
 ```
@@ -151,7 +151,7 @@ A dark, atmospheric UI built around the metaphor of crafting. Ember particles dr
 | **Backend** | [Rust 2021](https://www.rust-lang.org) | Memory-safe backend with async Tokio runtime |
 | **LLM** | [Ollama](https://ollama.com) | Local inference, NDJSON streaming, any GGUF model |
 | **Database** | [SQLite](https://sqlite.org) via rusqlite | WAL mode, foreign key cascades, schema migrations |
-| **Search** | DuckDuckGo + [Tavily](https://tavily.com) + [SearXNG](https://docs.searxng.org) | Three providers with automatic failover |
+| **Search** | DuckDuckGo + [SearXNG](https://docs.searxng.org) | Free providers with automatic failover |
 | **Styling** | [Tailwind CSS 4](https://tailwindcss.com) | Utility-first with `@theme` design tokens |
 | **Markdown** | react-markdown + remark-gfm | GFM rendering with Prism syntax highlighting |
 | **Build** | [Vite 6](https://vite.dev) | Frontend bundling, HMR in development |
@@ -175,7 +175,7 @@ See [`distribution/INSTALL.md`](distribution/INSTALL.md) for detailed instructio
 - **macOS** with Apple Silicon (Intel works too, just slower inference)
 - **Ollama** installed and running ([ollama.com](https://ollama.com))
 - **Node.js** 18+ and **Rust** 1.75+
-- _Optional:_ [Tavily API key](https://tavily.com) for higher-quality web search
+- _Optional:_ self-hosted [SearXNG](https://docs.searxng.org) endpoint for custom search routing
 
 ```bash
 # Install Ollama and pull the default model
@@ -277,7 +277,7 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 ### Future
 
 - [ ] Windows and Linux builds
-- [ ] Multiple LLM providers (Anthropic API, OpenAI) alongside Ollama
+- [ ] Additional local model runtimes (LM Studio/Ollama-compatible endpoints)
 - [ ] Project templates for common app types
 - [ ] Import existing codebases for refactoring plans
 - [ ] Export to GitHub Issues / Linear integration
@@ -307,8 +307,6 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- [Anthropic](https://anthropic.com) — Claude and Claude Code, the tools this project is built to complement
 - [Tauri](https://tauri.app) — proving desktop apps don't need Electron's footprint
 - [Ollama](https://ollama.com) — making local LLM inference accessible to everyone
-- [Tavily](https://tavily.com) — web search API for grounded AI responses
 - [SearXNG](https://docs.searxng.org) — privacy-respecting metasearch for self-hosters

@@ -267,8 +267,8 @@ What must exist and be working before starting:
 
 **Files to create/modify:**
 List every file with its purpose:
-- `src-tauri/src/search/mod.rs` — Search client trait and Tavily implementation
-- `src-tauri/src/search/tavily.rs` — Tavily API client
+- `src-tauri/src/search/mod.rs` — Search client trait and provider routing
+- `src-tauri/src/search/duckduckgo.rs` — Free search provider client
 - `src/components/SearchIndicator.tsx` — "Searching..." UI indicator
 
 **Dependencies to add:**
@@ -282,7 +282,7 @@ npm install [package]@[version]
 
 **Key implementation notes:**
 - [Specific pattern to use]: "Implement search as an async trait so we can swap providers"
-- [Specific crate/API details]: "Tavily API endpoint is POST https://api.tavily.com/search with JSON body {api_key, query, max_results}"
+- [Specific crate/API details]: "Prefer free providers (DuckDuckGo or self-hosted SearXNG) and avoid requiring API keys"
 - [Edge case to handle]: "Search timeout should be 5 seconds — don't block the conversation if search is slow"
 
 ### Prompt for Claude Code
@@ -310,7 +310,7 @@ All items must be binary yes/no — a non-technical user can verify each one.
 Common mistakes and framework gotchas for THIS specific phase:
 - "Tauri commands must be registered in `lib.rs` — if you add a new command and it's not callable from the frontend, check registration"
 - "reqwest needs tokio runtime — Tauri 2.0 already provides one, don't add another"
-- "Tavily free tier: 1000 requests/month. Add rate limiting or the user will burn through it in testing"
+- "Search providers can fail or rate-limit. Ensure graceful fallback that doesn't block chat responses"
 
 ---
 

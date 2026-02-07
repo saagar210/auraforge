@@ -147,8 +147,8 @@ export function HelpPanel({ open, onClose }: HelpPanelProps) {
             <div className="text-sm text-text-secondary pb-3 pl-1">
               Optionally, AuraForge can search the web to provide up-to-date
               information about frameworks, libraries, and best practices. You
-              can use the free DuckDuckGo provider or add a Tavily API key for
-              better results. This is configured in Settings.
+              can use free DuckDuckGo search or your own SearXNG endpoint.
+              This is configured in Settings.
             </div>
           </details>
 

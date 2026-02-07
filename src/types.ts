@@ -93,7 +93,7 @@ export interface AppConfig {
 }
 
 export interface LLMConfig {
-  provider: 'ollama' | 'anthropic' | 'openai';
+  provider: 'ollama';
   model: string;
   base_url: string;
   api_key?: string | null;
@@ -103,7 +103,7 @@ export interface LLMConfig {
 
 export interface SearchConfig {
   enabled: boolean;
-  provider: 'tavily' | 'duckduckgo' | 'searxng' | 'none';
+  provider: 'duckduckgo' | 'searxng' | 'none';
   tavily_api_key: string;
   searxng_url: string;
   proactive: boolean;
