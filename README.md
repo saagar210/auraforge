@@ -163,8 +163,8 @@ A dark, atmospheric UI built around the metaphor of crafting. Ember particles dr
 ### Option A: Install the App
 
 1. Install [Ollama](https://ollama.com/download) and open it
-2. Download the latest `.dmg` from [**Releases**](https://github.com/saagar210/auraforge/releases/latest)
-3. Drag AuraForge to Applications and open it
+2. Download the latest release artifact for your platform from [**Releases**](https://github.com/saagar210/auraforge/releases/latest) (`.dmg` on macOS, `.deb`/`.AppImage` on Linux)
+3. Install and open AuraForge
 4. Follow the setup wizard — it handles model download and configuration
 
 See [`distribution/INSTALL.md`](distribution/INSTALL.md) for detailed instructions and [`distribution/QUICK_REFERENCE.md`](distribution/QUICK_REFERENCE.md) for a workflow cheat sheet.
@@ -172,7 +172,7 @@ See [`distribution/INSTALL.md`](distribution/INSTALL.md) for detailed instructio
 ### Option B: Build from Source
 
 **Prerequisites:**
-- **macOS** with Apple Silicon (Intel works too, just slower inference)
+- **macOS or Linux**
 - **Ollama** installed and running ([ollama.com](https://ollama.com))
 - **Node.js** 18+ and **Rust** 1.75+
 - _Optional:_ [Tavily API key](https://tavily.com) for higher-quality web search
@@ -192,9 +192,9 @@ npm run tauri dev
 
 ### First Run
 
-AuraForge checks for Ollama connectivity and model availability on startup. If anything is missing, a setup wizard walks you through installation and model download. Once set up, describe what you want to build and AuraForge takes it from there.
+AuraForge checks local runtime connectivity and model availability on startup. If anything is missing, a setup wizard walks you through setup. Once configured, describe what you want to build and AuraForge takes it from there.
 
-Health is re-checked every 60 seconds. If Ollama disconnects mid-session, a toast notification alerts you immediately.
+Health is re-checked every 60 seconds. If your local model runtime disconnects mid-session, a toast notification alerts you immediately.
 
 ### Production Build
 
@@ -203,6 +203,7 @@ npm run tauri build
 ```
 
 Produces a `.app` bundle and `.dmg` installer in `src-tauri/target/release/bundle/`.
+On Linux, the same command produces `.deb` and `.AppImage` bundles in `src-tauri/target/release/bundle/`.
 
 ---
 
@@ -277,7 +278,7 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 
 ### Future
 
-- [ ] Linux builds (Windows deferred)
+- [x] Linux builds (Windows deferred)
 - [x] Additional local model runtimes (LM Studio/OpenAI-compatible local endpoints)
 - [x] Project templates for common app types
 - [x] Import existing codebases for refactoring plans

@@ -2,7 +2,7 @@
 
 Updated: 2026-02-07
 Owner: Engineering
-Status: Steps complete (`confidence scoring`, `planning coverage UI`, `audit report fixes`, `additional local runtimes`, `project templates`, `codebase import`, `conversation branching`), remaining items planned below
+Status: Active roadmap complete (`confidence scoring`, `planning coverage UI`, `audit report fixes`, `additional local runtimes`, `project templates`, `codebase import`, `conversation branching`, `linux builds`). Deferred-only items remain below.
 
 ## 1) Fixed Product Constraints
 
@@ -33,7 +33,7 @@ These constraints are mandatory for all remaining work:
 
 ## 2.1 Active roadmap items
 
-1. Linux build/release hardening (Windows deferred)
+Active roadmap items are complete.
 
 ## 2.2 Explicitly deferred
 
