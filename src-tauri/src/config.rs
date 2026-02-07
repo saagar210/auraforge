@@ -12,6 +12,7 @@ llm:
   provider: ollama                          # ollama | anthropic | openai
   model: qwen3-coder:30b-a3b-instruct-q4_K_M
   base_url: http://localhost:11434          # Ollama default
+  api_key: ""                               # Optional for remote providers
   temperature: 0.7
   max_tokens: 65536
 
@@ -31,6 +32,7 @@ ui:
 output:
   include_conversation: true                # Include CONVERSATION.md
   default_save_path: ~/Projects             # Default folder picker location
+  default_target: generic                   # claude | codex | cursor | gemini | generic
 "#;
 
 pub fn auraforge_dir() -> PathBuf {
@@ -196,6 +198,13 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
         return Err(ConfigError::MissingField(
             "output.default_save_path".to_string(),
         ));
+    }
+    let target = config.output.default_target.as_str();
+    if !["claude", "codex", "cursor", "gemini", "generic"].contains(&target) {
+        return Err(ConfigError::InvalidValue(format!(
+            "output.default_target={}",
+            config.output.default_target
+        )));
     }
 
     Ok(())

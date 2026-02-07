@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -54,6 +55,7 @@ pub struct LLMConfig {
     pub provider: String,
     pub model: String,
     pub base_url: String,
+    pub api_key: Option<String>,
     pub temperature: f64,
     pub max_tokens: u64,
 }
@@ -76,6 +78,7 @@ pub struct UIConfig {
 pub struct OutputConfig {
     pub include_conversation: bool,
     pub default_save_path: String,
+    pub default_target: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,12 +93,57 @@ pub struct GeneratedDocument {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateDocumentsRequest {
     pub session_id: String,
+    pub target: Option<String>,
+    pub force: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveToFolderRequest {
     pub session_id: String,
     pub folder_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ForgeTarget {
+    Claude,
+    Codex,
+    Cursor,
+    Gemini,
+    Generic,
+}
+
+impl ForgeTarget {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ForgeTarget::Claude => "claude",
+            ForgeTarget::Codex => "codex",
+            ForgeTarget::Cursor => "cursor",
+            ForgeTarget::Gemini => "gemini",
+            ForgeTarget::Generic => "generic",
+        }
+    }
+}
+
+impl fmt::Display for ForgeTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for ForgeTarget {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "claude" => Ok(ForgeTarget::Claude),
+            "codex" => Ok(ForgeTarget::Codex),
+            "cursor" => Ok(ForgeTarget::Cursor),
+            "gemini" => Ok(ForgeTarget::Gemini),
+            "generic" => Ok(ForgeTarget::Generic),
+            other => Err(format!("Unsupported forge target: {}", other)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,6 +160,24 @@ pub struct GenerateComplete {
     pub count: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityReport {
+    pub score: u8,
+    pub missing_must_haves: Vec<String>,
+    pub missing_should_haves: Vec<String>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerationMetadata {
+    pub session_id: String,
+    pub target: String,
+    pub provider: String,
+    pub model: String,
+    pub quality_json: Option<String>,
+    pub created_at: String,
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -119,6 +185,7 @@ impl Default for AppConfig {
                 provider: "ollama".to_string(),
                 model: "qwen3-coder:30b-a3b-instruct-q4_K_M".to_string(),
                 base_url: "http://localhost:11434".to_string(),
+                api_key: None,
                 temperature: 0.7,
                 max_tokens: 65536,
             },
@@ -135,6 +202,7 @@ impl Default for AppConfig {
             output: OutputConfig {
                 include_conversation: true,
                 default_save_path: "~/Projects".to_string(),
+                default_target: "generic".to_string(),
             },
         }
     }

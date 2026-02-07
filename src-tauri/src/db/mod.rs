@@ -68,6 +68,15 @@ impl Database {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS generation_metadata (
+                session_id TEXT PRIMARY KEY,
+                target TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                quality_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version INTEGER PRIMARY KEY
             );
@@ -75,6 +84,7 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
             CREATE INDEX IF NOT EXISTS idx_documents_session ON documents(session_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_generation_metadata_created ON generation_metadata(created_at DESC);
             ",
         )?;
         Ok(())
@@ -388,6 +398,55 @@ impl Database {
             params![session_id],
             |row| row.get(0),
         )
+    }
+
+    pub fn upsert_generation_metadata(
+        &self,
+        session_id: &str,
+        target: &str,
+        provider: &str,
+        model: &str,
+        quality_json: Option<&str>,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.conn();
+        conn.execute(
+            "INSERT INTO generation_metadata (session_id, target, provider, model, quality_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+             ON CONFLICT(session_id) DO UPDATE SET
+                target=excluded.target,
+                provider=excluded.provider,
+                model=excluded.model,
+                quality_json=excluded.quality_json,
+                created_at=CURRENT_TIMESTAMP",
+            params![session_id, target, provider, model, quality_json],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_generation_metadata(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<GenerationMetadata>, rusqlite::Error> {
+        let conn = self.conn();
+        match conn.query_row(
+            "SELECT session_id, target, provider, model, quality_json, created_at
+             FROM generation_metadata WHERE session_id = ?1",
+            params![session_id],
+            |row| {
+                Ok(GenerationMetadata {
+                    session_id: row.get(0)?,
+                    target: row.get(1)?,
+                    provider: row.get(2)?,
+                    model: row.get(3)?,
+                    quality_json: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            },
+        ) {
+            Ok(meta) => Ok(Some(meta)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     // ---- Preferences ----
@@ -709,6 +768,33 @@ mod tests {
             db.get_preference("wizard_completed").unwrap(),
             Some("true".to_string())
         );
+    }
+
+    #[test]
+    fn upsert_and_get_generation_metadata() {
+        let db = test_db();
+        let session = db.create_session(Some("Meta")).unwrap();
+        db.upsert_generation_metadata(
+            &session.id,
+            "generic",
+            "ollama",
+            "qwen3-coder",
+            Some(r#"{"score":75}"#),
+        )
+        .unwrap();
+
+        let meta = db.get_generation_metadata(&session.id).unwrap().unwrap();
+        assert_eq!(meta.target, "generic");
+        assert_eq!(meta.provider, "ollama");
+        assert_eq!(meta.model, "qwen3-coder");
+
+        db.upsert_generation_metadata(&session.id, "codex", "openai", "gpt-5", None)
+            .unwrap();
+        let updated = db.get_generation_metadata(&session.id).unwrap().unwrap();
+        assert_eq!(updated.target, "codex");
+        assert_eq!(updated.provider, "openai");
+        assert_eq!(updated.model, "gpt-5");
+        assert!(updated.quality_json.is_none());
     }
 
     #[test]

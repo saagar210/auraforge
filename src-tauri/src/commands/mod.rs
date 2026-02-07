@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tauri::{Emitter, State};
 
 use crate::config::save_config;
+use crate::docgen;
 use crate::error::{AppError, ErrorResponse};
 use crate::llm::ChatMessage;
 use crate::search::{self, SearchResult};
@@ -641,9 +642,38 @@ pub async fn generate_documents(
     state: State<'_, AppState>,
     request: GenerateDocumentsRequest,
 ) -> Result<Vec<GeneratedDocument>, ErrorResponse> {
-    crate::docgen::generate_all_documents(&app, &state, &request.session_id)
+    let config = state
+        .config
+        .lock()
+        .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
+        .clone();
+    let target = resolve_forge_target(request.target.as_deref(), &config)?;
+    let quality = analyze_plan_readiness_internal(&state, &request.session_id)?;
+
+    if !request.force.unwrap_or(false) && !quality.missing_must_haves.is_empty() {
+        return Err(to_response(AppError::Config(format!(
+            "Readiness check has missing must-haves: {}. Continue with force=true to forge anyway.",
+            quality.missing_must_haves.join(", ")
+        ))));
+    }
+
+    let docs = docgen::generate_all_documents(&app, &state, &request.session_id, &target)
         .await
-        .map_err(to_response)
+        .map_err(to_response)?;
+
+    let quality_json = serde_json::to_string(&quality).ok();
+    state
+        .db
+        .upsert_generation_metadata(
+            &request.session_id,
+            target.as_str(),
+            &config.llm.provider,
+            &config.llm.model,
+            quality_json.as_deref(),
+        )
+        .map_err(to_response)?;
+
+    Ok(docs)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -684,6 +714,25 @@ pub async fn check_documents_stale(
     }
 }
 
+#[tauri::command(rename_all = "snake_case")]
+pub async fn analyze_plan_readiness(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<QualityReport, ErrorResponse> {
+    analyze_plan_readiness_internal(&state, &session_id)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_generation_metadata(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Option<GenerationMetadata>, ErrorResponse> {
+    state
+        .db
+        .get_generation_metadata(&session_id)
+        .map_err(to_response)
+}
+
 // ============ EXPORT ============
 
 #[tauri::command(rename_all = "snake_case")]
@@ -707,6 +756,10 @@ pub async fn save_to_folder(
         .db
         .get_session(&request.session_id)
         .map_err(to_response)?;
+    let generation_meta = state
+        .db
+        .get_generation_metadata(&request.session_id)
+        .map_err(to_response)?;
 
     // Sanitize session name for folder name
     let sanitized_name = sanitize_folder_name(&session.name);
@@ -717,6 +770,9 @@ pub async fn save_to_folder(
     let output_path_for_thread = output_path.clone();
     let docs_for_thread = documents.clone();
     let output_dir_for_thread = output_dir.clone();
+    let meta_for_thread = generation_meta.clone();
+    let session_name_for_thread = session.name.clone();
+    let session_id_for_thread = request.session_id.clone();
 
     let write_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), AppError> {
         if output_dir_for_thread.exists() {
@@ -774,6 +830,46 @@ pub async fn save_to_folder(
             let _ = std::fs::remove_dir_all(&staging_dir);
             return Err(err);
         }
+
+        let manifest = ExportManifest {
+            session_id: session_id_for_thread.clone(),
+            session_name: session_name_for_thread.clone(),
+            target: meta_for_thread
+                .as_ref()
+                .map(|m| m.target.clone())
+                .unwrap_or_else(|| "generic".to_string()),
+            provider: meta_for_thread
+                .as_ref()
+                .map(|m| m.provider.clone())
+                .unwrap_or_else(|| "ollama".to_string()),
+            model: meta_for_thread
+                .as_ref()
+                .map(|m| m.model.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            quality: meta_for_thread
+                .as_ref()
+                .and_then(|m| m.quality_json.as_ref())
+                .and_then(|q| serde_json::from_str::<QualityReport>(q).ok()),
+            files: docs_for_thread
+                .iter()
+                .map(|doc| doc.filename.clone())
+                .collect(),
+        };
+        let manifest_json =
+            serde_json::to_string_pretty(&manifest).map_err(|e| AppError::FileSystem {
+                path: staging_dir.to_string_lossy().to_string(),
+                message: format!("Failed to serialize export manifest: {}", e),
+            })?;
+        std::fs::write(staging_dir.join("manifest.json"), manifest_json).map_err(|e| {
+            AppError::FileSystem {
+                path: staging_dir
+                    .join("manifest.json")
+                    .to_string_lossy()
+                    .to_string(),
+                message: format!("Failed to write export manifest: {}", e),
+            }
+        })?;
 
         std::fs::rename(&staging_dir, &output_dir_for_thread).map_err(|e| {
             let _ = std::fs::remove_dir_all(&staging_dir);
@@ -855,6 +951,39 @@ fn sanitize_folder_name(name: &str) -> String {
     } else {
         sanitized
     }
+}
+
+fn analyze_plan_readiness_internal(
+    state: &State<'_, AppState>,
+    session_id: &str,
+) -> Result<QualityReport, ErrorResponse> {
+    let messages = state.db.get_messages(session_id).map_err(to_response)?;
+    Ok(docgen::analyze_plan_readiness(&messages))
+}
+
+fn resolve_forge_target(
+    target: Option<&str>,
+    config: &AppConfig,
+) -> Result<ForgeTarget, ErrorResponse> {
+    let candidate = target.unwrap_or(config.output.default_target.as_str());
+    candidate.parse::<ForgeTarget>().map_err(|e| {
+        to_response(AppError::Config(format!(
+            "Invalid forge target '{}': {}",
+            candidate, e
+        )))
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportManifest {
+    session_id: String,
+    session_name: String,
+    target: String,
+    provider: String,
+    model: String,
+    created_at: String,
+    quality: Option<QualityReport>,
+    files: Vec<String>,
 }
 
 // ============ HELPERS ============

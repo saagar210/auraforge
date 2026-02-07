@@ -187,6 +187,8 @@ pub fn run() {
             commands::generate_documents,
             commands::get_documents,
             commands::check_documents_stale,
+            commands::analyze_plan_readiness,
+            commands::get_generation_metadata,
             commands::save_to_folder,
             commands::web_search,
         ])

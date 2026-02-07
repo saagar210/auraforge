@@ -1,18 +1,24 @@
 mod prompts;
+mod quality;
 
 use tauri::Emitter;
 
 use crate::error::AppError;
 use crate::llm::ChatMessage;
 use crate::state::AppState;
-use crate::types::{GenerateComplete, GenerateProgress, GeneratedDocument, Message, Session};
+use crate::types::{
+    ForgeTarget, GenerateComplete, GenerateProgress, GeneratedDocument, Message, QualityReport,
+    Session,
+};
 
 use prompts::*;
+pub use quality::analyze_plan_readiness;
 
 pub async fn generate_all_documents(
     app: &tauri::AppHandle,
     state: &AppState,
     session_id: &str,
+    target: &ForgeTarget,
 ) -> Result<Vec<GeneratedDocument>, AppError> {
     let messages = state.db.get_messages(session_id).map_err(AppError::from)?;
 
@@ -44,7 +50,7 @@ pub async fn generate_all_documents(
         ("START_HERE.md", START_HERE_PROMPT),
     ];
 
-    let total = doc_configs.len() + if include_conversation { 1 } else { 0 };
+    let total = doc_configs.len() + if include_conversation { 2 } else { 1 };
 
     for (i, (filename, prompt_template)) in doc_configs.iter().enumerate() {
         // Emit progress
@@ -124,10 +130,11 @@ pub async fn generate_all_documents(
 
     // CONVERSATION.md — generated from data, not LLM (optional)
     if include_conversation {
+        let conversation_step = total - 1;
         let _ = app.emit(
             "generate:progress",
             GenerateProgress {
-                current: total,
+                current: conversation_step,
                 total,
                 filename: "CONVERSATION.md".to_string(),
                 session_id: session_id.to_string(),
@@ -137,6 +144,23 @@ pub async fn generate_all_documents(
         let conversation_md = generate_conversation_md(&session, &messages);
         drafts.push(("CONVERSATION.md".to_string(), conversation_md));
     }
+
+    // MODEL_HANDOFF.md — target-aware handoff instructions.
+    let handoff_step = total;
+    let _ = app.emit(
+        "generate:progress",
+        GenerateProgress {
+            current: handoff_step,
+            total,
+            filename: "MODEL_HANDOFF.md".to_string(),
+            session_id: session_id.to_string(),
+        },
+    );
+    let quality = analyze_plan_readiness(&messages);
+    drafts.push((
+        "MODEL_HANDOFF.md".to_string(),
+        generate_model_handoff_doc(&session, target, &quality),
+    ));
 
     let documents = state
         .db
@@ -210,6 +234,83 @@ fn generate_conversation_md(session: &Session, messages: &[Message]) -> String {
          **Session ended**: {}\n",
         session.updated_at
     ));
+
+    output
+}
+
+fn generate_model_handoff_doc(
+    session: &Session,
+    target: &ForgeTarget,
+    quality: &QualityReport,
+) -> String {
+    let target_name = match target {
+        ForgeTarget::Claude => "Claude Code",
+        ForgeTarget::Codex => "OpenAI Codex",
+        ForgeTarget::Cursor => "Cursor Agent",
+        ForgeTarget::Gemini => "Gemini CLI/Agent",
+        ForgeTarget::Generic => "Any Coding Model",
+    };
+
+    let mut output = format!(
+        "# Model Handoff ({})\n\n\
+         This execution pack was forged for **{}** and can be adapted for other coding agents.\n\n\
+         ## Session\n\n\
+         - Project: **{}**\n\
+         - Created: {}\n\
+         - Planning score: **{}/100**\n\n\
+         ## Use This Order\n\n\
+         1. Read `START_HERE.md`\n\
+         2. Read `SPEC.md`\n\
+         3. Read `PROMPTS.md`\n\
+         4. Read `CLAUDE.md` for repo conventions (applies broadly even for non-Claude targets)\n\n",
+        target.as_str(),
+        target_name,
+        session.name,
+        session.updated_at,
+        quality.score
+    );
+
+    if !quality.missing_must_haves.is_empty() {
+        output.push_str("## Missing Must-Haves\n\n");
+        for item in &quality.missing_must_haves {
+            output.push_str(&format!("- {}\n", item));
+        }
+        output.push('\n');
+    }
+
+    if !quality.missing_should_haves.is_empty() {
+        output.push_str("## Missing Should-Haves\n\n");
+        for item in &quality.missing_should_haves {
+            output.push_str(&format!("- {}\n", item));
+        }
+        output.push('\n');
+    }
+
+    output.push_str("## Target-Specific Prompt Header\n\n");
+    output.push_str(match target {
+        ForgeTarget::Claude => {
+            "Use `PROMPTS.md` phases directly in Claude Code, keeping checks after each phase.\n"
+        }
+        ForgeTarget::Codex => {
+            "Ask Codex to execute one phase at a time from `PROMPTS.md`, always running verification commands before moving to the next phase.\n"
+        }
+        ForgeTarget::Cursor => {
+            "Use Cursor Agent with one phase at a time, then apply and verify before continuing.\n"
+        }
+        ForgeTarget::Gemini => {
+            "Use Gemini with explicit phase boundaries and require command output summaries after each phase.\n"
+        }
+        ForgeTarget::Generic => {
+            "Use any coding model by enforcing phase-by-phase execution from `PROMPTS.md` with validation gates between phases.\n"
+        }
+    });
+
+    output.push_str(
+        "\n## Reliability Rules\n\n\
+         - Do not skip tests/checks listed in this plan.\n\
+         - Do not rewrite architecture unless required by a failing constraint.\n\
+         - Keep commits small and scoped to one logical fix/change.\n",
+    );
 
     output
 }
