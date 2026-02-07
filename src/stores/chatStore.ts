@@ -103,7 +103,7 @@ interface ChatState {
   // Document actions
   generateDocuments: () => Promise<void>;
   loadDocuments: () => Promise<void>;
-  checkStale: () => Promise<void>;
+  checkStale: (sessionIdOverride?: string) => Promise<void>;
   setShowPreview: (show: boolean) => void;
 
   // Export actions
@@ -127,6 +127,8 @@ interface ChatState {
 export const useChatStore = create<ChatState>((set, get) => {
   let streamBuffer = "";
   let streamRafId: number | null = null;
+  let cancelSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+  let cancelSafetySessionId: string | null = null;
 
   const flushStreamBuffer = () => {
     if (!streamBuffer) return;
@@ -146,6 +148,17 @@ export const useChatStore = create<ChatState>((set, get) => {
     } else {
       flushStreamBuffer();
     }
+  };
+
+  const clearCancelSafetyTimeout = (sessionId?: string) => {
+    if (sessionId && cancelSafetySessionId !== sessionId) {
+      return;
+    }
+    if (cancelSafetyTimer) {
+      clearTimeout(cancelSafetyTimer);
+    }
+    cancelSafetyTimer = null;
+    cancelSafetySessionId = null;
   };
 
   return ({
@@ -199,6 +212,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   retryLastMessage: async () => {
     const { messages, currentSessionId, isStreaming } = get();
     if (!currentSessionId || isStreaming) return;
+    clearCancelSafetyTimeout(currentSessionId);
 
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
     if (!lastUserMsg) return;
@@ -387,6 +401,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   sendMessage: async (content: string) => {
     const sessionId = get().currentSessionId;
     if (!sessionId || get().isStreaming) return;
+    clearCancelSafetyTimeout(sessionId);
 
     set({
       isStreaming: true,
@@ -452,11 +467,18 @@ export const useChatStore = create<ChatState>((set, get) => {
     } catch (e) {
       console.error("Failed to cancel response:", e);
     }
-    // Safety net: if backend fails to emit stream:done/error within 2s, force-reset
-    setTimeout(() => {
-      if (get().isStreaming && get().currentSessionId === sessionId) {
+    // Safety net: if backend fails to emit stream:done/error within 2s, force-reset.
+    clearCancelSafetyTimeout();
+    cancelSafetySessionId = sessionId;
+    cancelSafetyTimer = setTimeout(() => {
+      if (
+        cancelSafetySessionId === sessionId &&
+        get().isStreaming &&
+        get().currentSessionId === sessionId
+      ) {
         set({ isStreaming: false, streamingContent: "" });
       }
+      clearCancelSafetyTimeout(sessionId);
     }, 2000);
   },
 
@@ -629,24 +651,31 @@ export const useChatStore = create<ChatState>((set, get) => {
       const documents = await invoke<GeneratedDocument[]>("get_documents", {
         session_id: sessionId,
       });
-      if (documents.length > 0) {
-        set({ documents });
-        // Check staleness
-        get().checkStale();
+      if (get().currentSessionId !== sessionId) {
+        return;
       }
+      set({
+        documents,
+        documentsStale: false,
+      });
+      // Check staleness for this same session in the background.
+      void get().checkStale(sessionId);
     } catch (e) {
       console.error("Failed to load documents:", e);
     }
   },
 
-  checkStale: async () => {
-    const sessionId = get().currentSessionId;
+  checkStale: async (sessionIdOverride?: string) => {
+    const sessionId = sessionIdOverride ?? get().currentSessionId;
     if (!sessionId) return;
 
     try {
       const stale = await invoke<boolean>("check_documents_stale", {
         session_id: sessionId,
       });
+      if (get().currentSessionId !== sessionId) {
+        return;
+      }
       set({ documentsStale: stale });
     } catch (e) {
       console.error("Failed to check staleness:", e);
@@ -730,6 +759,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       const { session_id } = event.payload;
       const current = get().currentSessionId;
       if (session_id && current && session_id !== current) return;
+      clearCancelSafetyTimeout(session_id);
       flushStreamBuffer();
       set({
         isStreaming: false,
@@ -745,6 +775,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       const { session_id } = event.payload;
       const current = get().currentSessionId;
       if (session_id && current && session_id !== current) return;
+      clearCancelSafetyTimeout(session_id);
       flushStreamBuffer();
       set({
         isStreaming: false,
@@ -855,6 +886,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   },
 
   cleanupEventListeners: () => {
+    clearCancelSafetyTimeout();
     if (streamRafId !== null && typeof cancelAnimationFrame === "function") {
       cancelAnimationFrame(streamRafId);
     }
