@@ -1,16 +1,16 @@
 use serde::Serialize;
-use std::collections::HashSet;
-use std::fs;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
 use crate::config::save_config;
+use crate::docgen;
 use crate::error::{AppError, ErrorResponse};
+use crate::importer;
 use crate::llm::ChatMessage;
 use crate::search::{self, SearchResult};
 use crate::state::AppState;
+use crate::templates;
 use crate::types::*;
 
 const SYSTEM_PROMPT: &str = r##"You are AuraForge, a senior engineering planning partner. You help people transform project ideas into comprehensive plans that AI coding tools (like Claude Code) can execute with minimal guesswork.
@@ -130,7 +130,7 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthStatus, Er
         .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
         .clone();
 
-    let (provider_connected, model_available) = state.ollama.health_check(&config).await;
+    let (ollama_connected, ollama_model_available) = state.ollama.health_check(&config).await;
 
     let config_error = state
         .config_error
@@ -146,19 +146,18 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthStatus, Er
     let config_valid = config_error.is_none();
 
     let mut errors = Vec::new();
+    let provider_label = if config.llm.provider == "ollama" {
+        "Ollama"
+    } else {
+        "local OpenAI-compatible runtime"
+    };
 
-    if !provider_connected {
-        let msg = match config.llm.provider.as_str() {
-            "ollama" => format!(
-                "Cannot connect to Ollama at {}. Is it running?",
-                config.llm.base_url
-            ),
-            "openai" => "Cannot reach OpenAI or OPENAI_API_KEY is missing.".to_string(),
-            "anthropic" => "Cannot reach Anthropic or ANTHROPIC_API_KEY is missing.".to_string(),
-            _ => format!("Unsupported provider '{}'.", config.llm.provider),
-        };
-        errors.push(msg);
-    } else if !model_available {
+    if !ollama_connected {
+        errors.push(format!(
+            "Cannot connect to {} at {}.",
+            provider_label, config.llm.base_url
+        ));
+    } else if !ollama_model_available {
         if config.llm.provider == "ollama" {
             errors.push(format!(
                 "Model '{}' not found. Run: ollama pull {}",
@@ -172,8 +171,8 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthStatus, Er
             ));
         } else {
             errors.push(format!(
-                "Model '{}' is unavailable for {}.",
-                config.llm.model, config.llm.provider
+                "Model '{}' is not available from the configured runtime. Load the model in your runtime and retry.",
+                config.llm.model
             ));
         }
     }
@@ -189,8 +188,8 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthStatus, Er
     }
 
     Ok(HealthStatus {
-        ollama_connected: provider_connected,
-        ollama_model_available: model_available,
+        ollama_connected,
+        ollama_model_available,
         database_ok,
         config_valid,
         errors,
@@ -204,31 +203,6 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<AppConfig, ErrorRe
         .lock()
         .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
         .clone())
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn get_provider_capabilities(
-    state: State<'_, AppState>,
-) -> Result<ProviderCapabilities, ErrorResponse> {
-    let providers = ["ollama", "openai", "anthropic"]
-        .iter()
-        .map(|provider| match state.ollama.provider_supported(provider) {
-            Ok(()) => ProviderCapability {
-                key: (*provider).to_string(),
-                supported: true,
-                reason: None,
-            },
-            Err(err) => ProviderCapability {
-                key: (*provider).to_string(),
-                supported: false,
-                reason: Some(err.to_string()),
-            },
-        })
-        .collect();
-    Ok(ProviderCapabilities {
-        providers,
-        default_provider: "ollama".to_string(),
-    })
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -293,15 +267,11 @@ pub async fn list_models(state: State<'_, AppState>) -> Result<Vec<String>, Erro
         .lock()
         .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
         .clone();
-    let mut models = state
+    state
         .ollama
-        .list_models_for_provider(&config.llm.provider, &config.llm.base_url)
+        .list_models(&config.llm)
         .await
-        .map_err(to_response)?;
-    if models.is_empty() {
-        models.push(config.llm.model.clone());
-    }
-    Ok(models)
+        .map_err(to_response)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -315,14 +285,9 @@ pub async fn pull_model(
         .lock()
         .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
         .clone();
-    if config.llm.provider != "ollama" {
-        return Err(to_response(AppError::Config(
-            "Model pull is only supported for Ollama provider".to_string(),
-        )));
-    }
     state
         .ollama
-        .pull_model(&app, &config.llm.base_url, &model_name)
+        .pull_model(&app, &config.llm, &model_name)
         .await
         .map_err(to_response)
 }
@@ -353,7 +318,9 @@ pub async fn check_disk_space() -> Result<DiskSpace, ErrorResponse> {
             let ret = unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) };
             if ret == 0 {
                 let stat = unsafe { stat.assume_init() };
-                let available_bytes = stat.f_bavail as u64 * stat.f_frsize;
+                let available_bytes_u128 =
+                    u128::from(stat.f_bavail).saturating_mul(u128::from(stat.f_frsize));
+                let available_bytes = available_bytes_u128.min(u128::from(u64::MAX)) as u64;
                 let available_gb = available_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
                 return Ok(DiskSpace {
                     available_gb,
@@ -368,18 +335,13 @@ pub async fn check_disk_space() -> Result<DiskSpace, ErrorResponse> {
         let available_gb = match output {
             Ok(out) => {
                 let stdout = String::from_utf8_lossy(&out.stdout);
-                let available_kb = stdout
+                let available_kb: u64 = stdout
                     .lines()
                     .nth(1)
                     .and_then(|line| line.split_whitespace().nth(3))
-                    .and_then(|s| s.parse::<u64>().ok());
-                match available_kb {
-                    Some(kb) => kb as f64 / 1_048_576.0,
-                    None => {
-                        log::warn!("Unable to parse df output; assuming sufficient space");
-                        100.0
-                    }
-                }
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                available_kb as f64 / 1_048_576.0
             }
             Err(_) => {
                 // Cannot determine disk space (e.g., Windows without df)
@@ -414,6 +376,133 @@ pub async fn create_session(
     state
         .db
         .create_session(request.name.as_deref())
+        .map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn list_templates() -> Result<Vec<PlanningTemplate>, ErrorResponse> {
+    templates::list_templates().map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn create_session_from_template(
+    state: State<'_, AppState>,
+    request: CreateSessionFromTemplateRequest,
+) -> Result<Session, ErrorResponse> {
+    let template = templates::get_template(&request.template_id).map_err(to_response)?;
+    let session_name = request.name.as_deref().unwrap_or(template.name.as_str());
+    let session = state
+        .db
+        .create_session(Some(session_name))
+        .map_err(to_response)?;
+
+    let metadata = serde_json::json!({
+        "template_id": template.id,
+        "template_version": template.version,
+    })
+    .to_string();
+    state
+        .db
+        .save_message(
+            &session.id,
+            "assistant",
+            &template.seed_prompt,
+            Some(metadata.as_str()),
+        )
+        .map_err(to_response)?;
+
+    state.db.get_session(&session.id).map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn create_branch_from_message(
+    state: State<'_, AppState>,
+    request: CreateBranchRequest,
+) -> Result<Session, ErrorResponse> {
+    let source_session = state
+        .db
+        .get_session(&request.session_id)
+        .map_err(to_response)?;
+    let source_messages = state
+        .db
+        .get_messages(&request.session_id)
+        .map_err(to_response)?;
+    if source_messages.is_empty() {
+        return Err(to_response(AppError::Validation(
+            "Cannot branch an empty conversation.".to_string(),
+        )));
+    }
+
+    let cutoff_index = match request.from_message_id.as_ref() {
+        Some(message_id) => source_messages
+            .iter()
+            .position(|message| &message.id == message_id)
+            .ok_or_else(|| {
+                to_response(AppError::Validation(format!(
+                    "Message '{}' was not found in this session.",
+                    message_id
+                )))
+            })?,
+        None => source_messages.len() - 1,
+    };
+    let copied_messages = &source_messages[..=cutoff_index];
+
+    let default_name = request
+        .name
+        .unwrap_or_else(|| format!("{} (branch)", source_session.name));
+    let branch_session = state
+        .db
+        .create_session(Some(default_name.as_str()))
+        .map_err(to_response)?;
+    let root_session_id = state
+        .db
+        .get_branch_root_session_id(&request.session_id)
+        .map_err(to_response)?;
+    state
+        .db
+        .register_branch(
+            &branch_session.id,
+            &root_session_id,
+            &request.session_id,
+            request.from_message_id.as_deref(),
+        )
+        .map_err(to_response)?;
+
+    for message in copied_messages {
+        if message.role == "system" {
+            continue;
+        }
+        state
+            .db
+            .save_message(
+                &branch_session.id,
+                &message.role,
+                &message.content,
+                message.metadata.as_deref(),
+            )
+            .map_err(to_response)?;
+    }
+
+    let note_metadata = serde_json::json!({
+        "branch_root_session_id": root_session_id,
+        "branch_source_session_id": request.session_id,
+        "branch_source_message_id": request.from_message_id,
+    })
+    .to_string();
+    let branch_note = "Branch created. Continue this path with alternate decisions while preserving the original session.";
+    state
+        .db
+        .save_message(
+            &branch_session.id,
+            "assistant",
+            branch_note,
+            Some(note_metadata.as_str()),
+        )
+        .map_err(to_response)?;
+
+    state
+        .db
+        .get_session(&branch_session.id)
         .map_err(to_response)
 }
 
@@ -471,29 +560,6 @@ pub async fn delete_sessions(
     state.db.delete_sessions(&session_ids).map_err(to_response)
 }
 
-#[tauri::command(rename_all = "snake_case")]
-pub async fn create_branch(
-    state: State<'_, AppState>,
-    request: CreateBranchRequest,
-) -> Result<ConversationBranch, ErrorResponse> {
-    state
-        .db
-        .create_branch(
-            &request.session_id,
-            &request.name,
-            request.base_message_id.as_deref(),
-        )
-        .map_err(to_response)
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn list_branches(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<Vec<ConversationBranch>, ErrorResponse> {
-    state.db.list_branches(&session_id).map_err(to_response)
-}
-
 // ============ MESSAGES ============
 
 #[tauri::command(rename_all = "snake_case")]
@@ -502,6 +568,45 @@ pub async fn get_messages(
     session_id: String,
 ) -> Result<Vec<Message>, ErrorResponse> {
     state.db.get_messages(&session_id).map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn import_codebase_context(
+    state: State<'_, AppState>,
+    request: ImportCodebaseRequest,
+) -> Result<CodebaseImportSummary, ErrorResponse> {
+    let root_path = request.root_path.clone();
+    let summary =
+        tauri::async_runtime::spawn_blocking(move || importer::summarize_codebase(&root_path))
+            .await
+            .map_err(|e| {
+                to_response(AppError::FileSystem {
+                    path: request.root_path.clone(),
+                    message: format!("Failed to import codebase: {}", e),
+                })
+            })?
+            .map_err(to_response)?;
+
+    let metadata = serde_json::json!({
+        "import_summary": &summary,
+    })
+    .to_string();
+    let content = format!(
+        "{}\n\nImported automatically from `{}`.",
+        summary.summary_markdown, summary.root_path
+    );
+
+    state
+        .db
+        .save_message(
+            &request.session_id,
+            "assistant",
+            &content,
+            Some(metadata.as_str()),
+        )
+        .map_err(to_response)?;
+
+    Ok(summary)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -523,14 +628,15 @@ pub async fn send_message(
             .rev()
             .find(|m| m.role == "user")
             .ok_or_else(|| {
-                to_response(AppError::Unknown(
-                    "No user message found to retry".to_string(),
+                to_response(AppError::Validation(
+                    "No prior user message exists for retry in this session.".to_string(),
                 ))
             })?;
         // Remove the old assistant response to avoid duplicates
-        if let Err(e) = state.db.delete_last_assistant_message(&session_id) {
-            log::warn!("Failed to delete old assistant message on retry: {}", e);
-        }
+        state
+            .db
+            .delete_last_assistant_message(&session_id)
+            .map_err(to_response)?;
         last_user
     } else {
         state
@@ -636,9 +742,7 @@ pub async fn send_message(
         .ollama
         .stream_chat(
             &app,
-            &config.llm.provider,
-            &config.llm.base_url,
-            &config.llm.model,
+            &config.llm,
             chat_messages,
             config.llm.temperature,
             Some(config.llm.max_tokens),
@@ -654,7 +758,6 @@ pub async fn send_message(
                 let meta = serde_json::json!({
                     "search_query": search_query,
                     "search_results": search_results,
-                    "search_timestamp": chrono::Utc::now().to_rfc3339(),
                 });
                 Some(meta.to_string())
             } else {
@@ -721,19 +824,41 @@ pub async fn generate_documents(
     state: State<'_, AppState>,
     request: GenerateDocumentsRequest,
 ) -> Result<Vec<GeneratedDocument>, ErrorResponse> {
-    crate::docgen::generate_all_documents(&app, &state, &request.session_id)
-        .await
-        .map_err(to_response)
-}
+    let config = state
+        .config
+        .lock()
+        .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
+        .clone();
+    let target = resolve_forge_target(request.target.as_deref(), &config)?;
+    let quality = analyze_plan_readiness_internal(&state, &request.session_id)?;
 
-#[tauri::command(rename_all = "snake_case")]
-pub async fn regenerate_document(
-    state: State<'_, AppState>,
-    request: RegenerateDocumentRequest,
-) -> Result<GeneratedDocument, ErrorResponse> {
-    crate::docgen::regenerate_single_document(&state, &request.session_id, &request.filename)
+    if !request.force.unwrap_or(false) && !quality.missing_must_haves.is_empty() {
+        return Err(to_response(AppError::Validation(format!(
+            "Readiness check has missing must-haves: {}. Continue with force=true to forge anyway.",
+            quality.missing_must_haves.join(", ")
+        ))));
+    }
+
+    let docs = docgen::generate_all_documents(&app, &state, &request.session_id, &target)
         .await
-        .map_err(to_response)
+        .map_err(to_response)?;
+
+    let confidence = docgen::analyze_generation_confidence(&docs, Some(&quality));
+    let quality_json = serde_json::to_string(&quality).ok();
+    let confidence_json = serde_json::to_string(&confidence).ok();
+    state
+        .db
+        .upsert_generation_metadata(
+            &request.session_id,
+            target.as_str(),
+            &config.llm.provider,
+            &config.llm.model,
+            quality_json.as_deref(),
+            confidence_json.as_deref(),
+        )
+        .map_err(to_response)?;
+
+    Ok(docs)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -742,152 +867,6 @@ pub async fn get_documents(
     session_id: String,
 ) -> Result<Vec<GeneratedDocument>, ErrorResponse> {
     state.db.get_documents(&session_id).map_err(to_response)
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn get_document_versions(
-    state: State<'_, AppState>,
-    session_id: String,
-    filename: String,
-    limit: Option<usize>,
-) -> Result<Vec<DocumentVersion>, ErrorResponse> {
-    state
-        .db
-        .get_document_versions(&session_id, &filename, limit.unwrap_or(10))
-        .map_err(to_response)
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn assess_planning_readiness(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<PlanningReadiness, ErrorResponse> {
-    let messages = state.db.get_messages(&session_id).map_err(to_response)?;
-    let docs = state.db.get_documents(&session_id).map_err(to_response)?;
-
-    let mut corpus = String::new();
-    for msg in &messages {
-        if msg.role != "system" {
-            corpus.push_str(&msg.content.to_lowercase());
-            corpus.push('\n');
-        }
-    }
-
-    let must_have_topics = vec![
-        (
-            "problem",
-            "Problem statement",
-            vec!["problem", "pain", "why", "goal", "outcome"],
-        ),
-        (
-            "flow",
-            "Core user flow",
-            vec!["flow", "steps", "user journey", "first", "then"],
-        ),
-        (
-            "stack",
-            "Tech stack",
-            vec!["react", "rust", "tauri", "database", "stack", "framework"],
-        ),
-        (
-            "data",
-            "Data model",
-            vec!["schema", "table", "entity", "model", "store", "persist"],
-        ),
-        (
-            "scope",
-            "Scope boundaries",
-            vec!["out of scope", "not include", "v1", "defer", "later"],
-        ),
-    ];
-
-    let should_have_topics = vec![
-        (
-            "errors",
-            "Error handling",
-            vec!["error", "retry", "failure", "fallback"],
-        ),
-        (
-            "tradeoffs",
-            "Trade-offs",
-            vec!["trade-off", "tradeoff", "pros", "cons", "decision"],
-        ),
-        (
-            "testing",
-            "Testing strategy",
-            vec!["test", "integration", "unit", "verification"],
-        ),
-        (
-            "security",
-            "Security",
-            vec!["security", "auth", "permission", "privacy"],
-        ),
-        (
-            "performance",
-            "Performance",
-            vec!["latency", "performance", "speed", "throughput", "memory"],
-        ),
-    ];
-
-    let evaluate = |topics: Vec<(&str, &str, Vec<&str>)>| -> Vec<CoverageItem> {
-        topics
-            .into_iter()
-            .map(|(key, label, keywords)| {
-                let hit_count = keywords.iter().filter(|k| corpus.contains(**k)).count();
-                let status = if hit_count >= 2 {
-                    "covered"
-                } else if hit_count == 1 {
-                    "partial"
-                } else {
-                    "missing"
-                };
-                CoverageItem {
-                    key: key.to_string(),
-                    label: label.to_string(),
-                    status: status.to_string(),
-                }
-            })
-            .collect()
-    };
-
-    let must_haves = evaluate(must_have_topics);
-    let should_haves = evaluate(should_have_topics);
-    let unresolved_tbd = docs
-        .iter()
-        .map(|d| d.content.matches("[TBD").count())
-        .sum::<usize>();
-
-    let score_points = must_haves.iter().fold(0u32, |acc, item| {
-        acc + match item.status.as_str() {
-            "covered" => 20,
-            "partial" => 10,
-            _ => 0,
-        }
-    }) + should_haves.iter().fold(0u32, |acc, item| {
-        acc + match item.status.as_str() {
-            "covered" => 6,
-            "partial" => 3,
-            _ => 0,
-        }
-    });
-    let score = (score_points.min(100)) as u8;
-
-    let missing_must = must_haves.iter().filter(|i| i.status == "missing").count();
-    let recommendation = if missing_must > 0 {
-        "Consider filling the missing must-have topics before forging.".to_string()
-    } else if unresolved_tbd > 0 {
-        "Plan is mostly ready; review unresolved [TBD] items before export.".to_string()
-    } else {
-        "Planning coverage looks strong.".to_string()
-    };
-
-    Ok(PlanningReadiness {
-        score,
-        must_haves,
-        should_haves,
-        unresolved_tbd,
-        recommendation,
-    })
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -920,6 +899,67 @@ pub async fn check_documents_stale(
     }
 }
 
+#[tauri::command(rename_all = "snake_case")]
+pub async fn analyze_plan_readiness(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<QualityReport, ErrorResponse> {
+    analyze_plan_readiness_internal(&state, &session_id)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_planning_coverage(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<CoverageReport, ErrorResponse> {
+    analyze_planning_coverage_internal(&state, &session_id)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_generation_metadata(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Option<GenerationMetadata>, ErrorResponse> {
+    state
+        .db
+        .get_generation_metadata(&session_id)
+        .map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_generation_confidence(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Option<ConfidenceReport>, ErrorResponse> {
+    let docs = state.db.get_documents(&session_id).map_err(to_response)?;
+    if docs.is_empty() {
+        return Ok(None);
+    }
+
+    let metadata = state
+        .db
+        .get_generation_metadata(&session_id)
+        .map_err(to_response)?;
+
+    if let Some(meta) = metadata.as_ref() {
+        if let Some(conf_json) = meta.confidence_json.as_ref() {
+            if let Ok(conf) = serde_json::from_str::<ConfidenceReport>(conf_json) {
+                return Ok(Some(conf));
+            }
+        }
+    }
+
+    let quality = metadata
+        .as_ref()
+        .and_then(|m| m.quality_json.as_ref())
+        .and_then(|q| serde_json::from_str::<QualityReport>(q).ok());
+
+    Ok(Some(docgen::analyze_generation_confidence(
+        &docs,
+        quality.as_ref(),
+    )))
+}
+
 // ============ EXPORT ============
 
 #[tauri::command(rename_all = "snake_case")]
@@ -943,6 +983,22 @@ pub async fn save_to_folder(
         .db
         .get_session(&request.session_id)
         .map_err(to_response)?;
+    let generation_meta = state
+        .db
+        .get_generation_metadata(&request.session_id)
+        .map_err(to_response)?;
+    let import_context = state
+        .db
+        .get_messages(&request.session_id)
+        .map_err(to_response)?
+        .into_iter()
+        .rev()
+        .find_map(|message| {
+            message
+                .metadata
+                .as_deref()
+                .and_then(extract_import_summary_from_metadata)
+        });
 
     // Sanitize session name for folder name
     let sanitized_name = sanitize_folder_name(&session.name);
@@ -953,50 +1009,130 @@ pub async fn save_to_folder(
     let output_path_for_thread = output_path.clone();
     let docs_for_thread = documents.clone();
     let output_dir_for_thread = output_dir.clone();
+    let meta_for_thread = generation_meta.clone();
+    let import_context_for_thread = import_context.clone();
+    let session_name_for_thread = session.name.clone();
+    let session_id_for_thread = request.session_id.clone();
 
     let write_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), AppError> {
         if output_dir_for_thread.exists() {
             return Err(AppError::FolderExists(output_path_for_thread));
         }
 
-        std::fs::create_dir(&output_dir_for_thread).map_err(|e| {
+        let staging_dir = output_dir_for_thread
+            .with_extension(format!("plan_tmp_{}", uuid::Uuid::new_v4().simple()));
+
+        std::fs::create_dir(&staging_dir).map_err(|e| {
             if e.kind() == std::io::ErrorKind::PermissionDenied {
                 AppError::FileSystem {
-                    path: output_dir_for_thread.to_string_lossy().to_string(),
+                    path: staging_dir.to_string_lossy().to_string(),
                     message: "Can't write to this location. Choose another folder.".to_string(),
                 }
             } else {
                 AppError::FileSystem {
-                    path: output_dir_for_thread.to_string_lossy().to_string(),
+                    path: staging_dir.to_string_lossy().to_string(),
                     message: format!("Failed to create folder: {}", e),
                 }
             }
         })?;
 
-        for doc in &docs_for_thread {
-            let file_path = output_dir_for_thread.join(&doc.filename);
-            std::fs::write(&file_path, &doc.content).map_err(|e| {
-                if e.raw_os_error() == Some(28) {
-                    AppError::FileSystem {
-                        path: file_path.to_string_lossy().to_string(),
-                        message: "Not enough disk space. Free up space and try again.".to_string(),
+        let write_docs_result = (|| -> Result<(), AppError> {
+            for doc in &docs_for_thread {
+                let staging_file_path = staging_dir.join(&doc.filename);
+                let final_file_path = output_dir_for_thread.join(&doc.filename);
+                std::fs::write(&staging_file_path, &doc.content).map_err(|e| {
+                    if e.raw_os_error() == Some(28) {
+                        AppError::FileSystem {
+                            path: final_file_path.to_string_lossy().to_string(),
+                            message: "Not enough disk space. Free up space and try again."
+                                .to_string(),
+                        }
+                    } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        AppError::FileSystem {
+                            path: final_file_path.to_string_lossy().to_string(),
+                            message: format!(
+                                "Permission denied writing {}. Choose another folder.",
+                                doc.filename
+                            ),
+                        }
+                    } else {
+                        AppError::FileSystem {
+                            path: final_file_path.to_string_lossy().to_string(),
+                            message: format!("Failed to write {}: {}", doc.filename, e),
+                        }
                     }
-                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    AppError::FileSystem {
-                        path: file_path.to_string_lossy().to_string(),
-                        message: format!(
-                            "Permission denied writing {}. Choose another folder.",
-                            doc.filename
-                        ),
-                    }
-                } else {
-                    AppError::FileSystem {
-                        path: file_path.to_string_lossy().to_string(),
-                        message: format!("Failed to write {}: {}", doc.filename, e),
-                    }
-                }
-            })?;
+                })?;
+            }
+            Ok(())
+        })();
+
+        if let Err(err) = write_docs_result {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            return Err(err);
         }
+
+        let manifest = ExportManifest {
+            session_id: session_id_for_thread.clone(),
+            session_name: session_name_for_thread.clone(),
+            target: meta_for_thread
+                .as_ref()
+                .map(|m| m.target.clone())
+                .unwrap_or_else(|| "generic".to_string()),
+            provider: meta_for_thread
+                .as_ref()
+                .map(|m| m.provider.clone())
+                .unwrap_or_else(|| "ollama".to_string()),
+            model: meta_for_thread
+                .as_ref()
+                .map(|m| m.model.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            quality: meta_for_thread
+                .as_ref()
+                .and_then(|m| m.quality_json.as_ref())
+                .and_then(|q| serde_json::from_str::<QualityReport>(q).ok()),
+            confidence: meta_for_thread
+                .as_ref()
+                .and_then(|m| m.confidence_json.as_ref())
+                .and_then(|q| serde_json::from_str::<ConfidenceReport>(q).ok()),
+            import_context: import_context_for_thread.clone(),
+            files: docs_for_thread
+                .iter()
+                .map(|doc| doc.filename.clone())
+                .collect(),
+        };
+        let manifest_json =
+            serde_json::to_string_pretty(&manifest).map_err(|e| AppError::FileSystem {
+                path: staging_dir.to_string_lossy().to_string(),
+                message: format!("Failed to serialize export manifest: {}", e),
+            })?;
+        std::fs::write(staging_dir.join("manifest.json"), manifest_json).map_err(|e| {
+            AppError::FileSystem {
+                path: staging_dir
+                    .join("manifest.json")
+                    .to_string_lossy()
+                    .to_string(),
+                message: format!("Failed to write export manifest: {}", e),
+            }
+        })?;
+
+        std::fs::rename(&staging_dir, &output_dir_for_thread).map_err(|e| {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            if e.kind() == std::io::ErrorKind::AlreadyExists || output_dir_for_thread.exists() {
+                AppError::FolderExists(output_path_for_thread.clone())
+            } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                AppError::FileSystem {
+                    path: output_dir_for_thread.to_string_lossy().to_string(),
+                    message: "Can't finalize export in this location. Choose another folder."
+                        .to_string(),
+                }
+            } else {
+                AppError::FileSystem {
+                    path: output_dir_for_thread.to_string_lossy().to_string(),
+                    message: format!("Failed to finalize export: {}", e),
+                }
+            }
+        })?;
 
         Ok(())
     })
@@ -1014,169 +1150,6 @@ pub async fn save_to_folder(
     Ok(output_path)
 }
 
-#[tauri::command(rename_all = "snake_case")]
-pub async fn list_plan_templates() -> Result<Vec<PlanTemplate>, ErrorResponse> {
-    Ok(vec![
-        PlanTemplate {
-            id: "saas".to_string(),
-            name: "SaaS Web App".to_string(),
-            description: "Multi-tenant product with auth, billing, and usage tracking".to_string(),
-            tags: vec!["web".to_string(), "saas".to_string(), "product".to_string()],
-            prompt_seed: "Plan a SaaS app with user onboarding, core workflows, billing hooks, and analytics.".to_string(),
-        },
-        PlanTemplate {
-            id: "api".to_string(),
-            name: "Backend API".to_string(),
-            description: "Service-first architecture with contracts, observability, and deployment".to_string(),
-            tags: vec!["backend".to_string(), "api".to_string(), "service".to_string()],
-            prompt_seed: "Plan an API-first backend with endpoint contracts, data model, tests, and rollout strategy.".to_string(),
-        },
-        PlanTemplate {
-            id: "cli".to_string(),
-            name: "Developer CLI".to_string(),
-            description: "Command-line tool with subcommands, config, and plugin/extensibility thinking".to_string(),
-            tags: vec!["cli".to_string(), "developer-tools".to_string()],
-            prompt_seed: "Plan a CLI with clear subcommands, config defaults, error messages, and integration tests.".to_string(),
-        },
-        PlanTemplate {
-            id: "agent".to_string(),
-            name: "AI Agent App".to_string(),
-            description: "Tool-using assistant with safety gates, memory model, and evaluation plan".to_string(),
-            tags: vec!["ai".to_string(), "agent".to_string()],
-            prompt_seed: "Plan an AI agent app with tool interfaces, prompt strategy, quality checks, and guardrails.".to_string(),
-        },
-    ])
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn import_repository_context(
-    request: RepoImportRequest,
-) -> Result<RepoImportContext, ErrorResponse> {
-    let root = PathBuf::from(&request.path);
-    if !root.exists() || !root.is_dir() {
-        return Err(to_response(AppError::FileSystem {
-            path: request.path,
-            message: "Repository path does not exist or is not a directory".to_string(),
-        }));
-    }
-
-    let max_files = request.max_files.unwrap_or(400);
-    let mut stack = vec![root.clone()];
-    let mut scanned = 0usize;
-    let mut key_files = Vec::new();
-    let mut languages = HashSet::new();
-
-    while let Some(dir) = stack.pop() {
-        let entries = fs::read_dir(&dir).map_err(|e| {
-            to_response(AppError::FileSystem {
-                path: dir.to_string_lossy().to_string(),
-                message: e.to_string(),
-            })
-        })?;
-        for entry in entries.flatten() {
-            if scanned >= max_files {
-                break;
-            }
-            let path = entry.path();
-            let file_name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default();
-            if file_name.starts_with('.') && file_name != ".env.example" {
-                continue;
-            }
-            if path.is_dir() {
-                if file_name == "node_modules" || file_name == "target" || file_name == "dist" {
-                    continue;
-                }
-                stack.push(path);
-                continue;
-            }
-            scanned += 1;
-
-            if is_key_project_file(&path) {
-                key_files.push(path.to_string_lossy().to_string());
-            }
-            if let Some(lang) = detect_language(&path) {
-                languages.insert(lang.to_string());
-            }
-        }
-        if scanned >= max_files {
-            break;
-        }
-    }
-
-    key_files.sort();
-    let mut detected_languages = languages.into_iter().collect::<Vec<_>>();
-    detected_languages.sort();
-
-    Ok(RepoImportContext {
-        root: root.to_string_lossy().to_string(),
-        detected_languages: detected_languages.clone(),
-        key_files: key_files.iter().take(25).cloned().collect(),
-        summary: format!(
-            "Scanned {} files. Detected languages: {}. Found {} key config/docs files.",
-            scanned,
-            if detected_languages.is_empty() {
-                "unknown".to_string()
-            } else {
-                detected_languages.join(", ")
-            },
-            key_files.len()
-        ),
-    })
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn build_issue_export_preview(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<Vec<BacklogItem>, ErrorResponse> {
-    let docs = state.db.get_documents(&session_id).map_err(to_response)?;
-    let prompts_doc = docs.iter().find(|d| d.filename == "PROMPTS.md");
-    let spec_doc = docs.iter().find(|d| d.filename == "SPEC.md");
-
-    let mut items = Vec::new();
-    if let Some(prompts) = prompts_doc {
-        for line in prompts
-            .content
-            .lines()
-            .filter(|l| l.starts_with("## Phase "))
-        {
-            let title = line.trim_start_matches('#').trim().to_string();
-            items.push(BacklogItem {
-                title,
-                body: "Generated from PROMPTS.md phase heading. Expand acceptance criteria before publishing to GitHub/Linear.".to_string(),
-                labels: vec!["planning".to_string(), "phase".to_string()],
-            });
-        }
-    }
-
-    if items.is_empty() {
-        items.push(BacklogItem {
-            title: "Project kickoff".to_string(),
-            body: "No phase headings found in PROMPTS.md yet. Generate documents first, then re-run export preview.".to_string(),
-            labels: vec!["planning".to_string()],
-        });
-    }
-
-    if let Some(spec) = spec_doc {
-        let tbd_count = spec.content.matches("[TBD").count();
-        if tbd_count > 0 {
-            items.push(BacklogItem {
-                title: "Resolve planning TBDs".to_string(),
-                body: format!(
-                    "SPEC.md currently has {} unresolved [TBD] markers. Resolve these before implementation starts.",
-                    tbd_count
-                ),
-                labels: vec!["planning".to_string(), "risk".to_string()],
-            });
-        }
-    }
-
-    Ok(items)
-}
-
 // ============ SEARCH ============
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1189,49 +1162,14 @@ pub async fn web_search(
         .lock()
         .map_err(|_| to_response(AppError::Config("Config lock poisoned".to_string())))?
         .clone();
-    if !config.search.enabled || config.search.provider == "none" {
-        return Ok(vec![]);
+    let mut search_config = config.search.clone();
+    search_config.enabled = true;
+    if search_config.provider == "none" {
+        search_config.provider = "duckduckgo".to_string();
     }
-    search::execute_search(&config.search, &query)
+    search::execute_search(&search_config, &query)
         .await
         .map_err(to_response)
-}
-
-fn is_key_project_file(path: &Path) -> bool {
-    matches!(
-        path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default(),
-        "package.json"
-            | "package-lock.json"
-            | "pnpm-lock.yaml"
-            | "Cargo.toml"
-            | "go.mod"
-            | "pyproject.toml"
-            | "requirements.txt"
-            | "README.md"
-            | "SPEC.md"
-            | "CLAUDE.md"
-            | "PROMPTS.md"
-            | "tauri.conf.json"
-    )
-}
-
-fn detect_language(path: &Path) -> Option<&'static str> {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or_default()
-    {
-        "ts" | "tsx" | "js" | "jsx" => Some("TypeScript/JavaScript"),
-        "rs" => Some("Rust"),
-        "py" => Some("Python"),
-        "go" => Some("Go"),
-        "java" => Some("Java"),
-        "kt" => Some("Kotlin"),
-        "swift" => Some("Swift"),
-        _ => None,
-    }
 }
 
 fn sanitize_folder_name(name: &str) -> String {
@@ -1260,7 +1198,55 @@ fn sanitize_folder_name(name: &str) -> String {
     }
 }
 
+fn analyze_plan_readiness_internal(
+    state: &State<'_, AppState>,
+    session_id: &str,
+) -> Result<QualityReport, ErrorResponse> {
+    let messages = state.db.get_messages(session_id).map_err(to_response)?;
+    Ok(docgen::analyze_plan_readiness(&messages))
+}
+
+fn analyze_planning_coverage_internal(
+    state: &State<'_, AppState>,
+    session_id: &str,
+) -> Result<CoverageReport, ErrorResponse> {
+    let messages = state.db.get_messages(session_id).map_err(to_response)?;
+    Ok(docgen::analyze_planning_coverage(&messages))
+}
+
+fn resolve_forge_target(
+    target: Option<&str>,
+    config: &AppConfig,
+) -> Result<ForgeTarget, ErrorResponse> {
+    let candidate = target.unwrap_or(config.output.default_target.as_str());
+    candidate.parse::<ForgeTarget>().map_err(|e| {
+        to_response(AppError::Validation(format!(
+            "Invalid forge target '{}': {}",
+            candidate, e
+        )))
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportManifest {
+    session_id: String,
+    session_name: String,
+    target: String,
+    provider: String,
+    model: String,
+    created_at: String,
+    quality: Option<QualityReport>,
+    confidence: Option<ConfidenceReport>,
+    import_context: Option<CodebaseImportSummary>,
+    files: Vec<String>,
+}
+
 // ============ HELPERS ============
+
+fn extract_import_summary_from_metadata(metadata: &str) -> Option<CodebaseImportSummary> {
+    let value = serde_json::from_str::<serde_json::Value>(metadata).ok()?;
+    serde_json::from_value::<CodebaseImportSummary>(value.get("import_summary")?.clone()).ok()
+}
 
 fn build_search_context(query: &str, results: &[SearchResult]) -> String {
     let mut context = format!(

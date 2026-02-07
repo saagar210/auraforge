@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -17,7 +17,7 @@ pub struct Message {
     pub session_id: String,
     pub role: String,
     pub content: String,
-    pub metadata: Option<Value>,
+    pub metadata: Option<String>,
     pub created_at: String,
 }
 
@@ -55,6 +55,7 @@ pub struct LLMConfig {
     pub provider: String,
     pub model: String,
     pub base_url: String,
+    pub api_key: Option<String>,
     pub temperature: f64,
     pub max_tokens: u64,
 }
@@ -77,6 +78,7 @@ pub struct UIConfig {
 pub struct OutputConfig {
     pub include_conversation: bool,
     pub default_save_path: String,
+    pub default_target: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,12 +93,8 @@ pub struct GeneratedDocument {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateDocumentsRequest {
     pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegenerateDocumentRequest {
-    pub session_id: String,
-    pub filename: String,
+    pub target: Option<String>,
+    pub force: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,88 +104,65 @@ pub struct SaveToFolderRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocumentVersion {
-    pub id: String,
+pub struct ImportCodebaseRequest {
     pub session_id: String,
-    pub filename: String,
-    pub version: i64,
-    pub content: String,
-    pub created_at: String,
+    pub root_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderCapability {
-    pub key: String,
-    pub supported: bool,
-    pub reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderCapabilities {
-    pub providers: Vec<ProviderCapability>,
-    pub default_provider: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoverageItem {
-    pub key: String,
-    pub label: String,
-    pub status: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanningReadiness {
-    pub score: u8,
-    pub must_haves: Vec<CoverageItem>,
-    pub should_haves: Vec<CoverageItem>,
-    pub unresolved_tbd: usize,
-    pub recommendation: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConversationBranch {
-    pub id: String,
-    pub session_id: String,
-    pub name: String,
-    pub base_message_id: Option<String>,
-    pub created_at: String,
+pub struct CreateSessionFromTemplateRequest {
+    pub template_id: String,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateBranchRequest {
     pub session_id: String,
-    pub name: String,
-    pub base_message_id: Option<String>,
+    pub from_message_id: Option<String>,
+    pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanTemplate {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub tags: Vec<String>,
-    pub prompt_seed: String,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ForgeTarget {
+    Claude,
+    Codex,
+    Cursor,
+    Gemini,
+    Generic,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RepoImportRequest {
-    pub path: String,
-    pub max_files: Option<usize>,
+impl ForgeTarget {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ForgeTarget::Claude => "claude",
+            ForgeTarget::Codex => "codex",
+            ForgeTarget::Cursor => "cursor",
+            ForgeTarget::Gemini => "gemini",
+            ForgeTarget::Generic => "generic",
+        }
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RepoImportContext {
-    pub root: String,
-    pub detected_languages: Vec<String>,
-    pub key_files: Vec<String>,
-    pub summary: String,
+impl fmt::Display for ForgeTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BacklogItem {
-    pub title: String,
-    pub body: String,
-    pub labels: Vec<String>,
+impl std::str::FromStr for ForgeTarget {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "claude" => Ok(ForgeTarget::Claude),
+            "codex" => Ok(ForgeTarget::Codex),
+            "cursor" => Ok(ForgeTarget::Cursor),
+            "gemini" => Ok(ForgeTarget::Gemini),
+            "generic" => Ok(ForgeTarget::Generic),
+            other => Err(format!("Unsupported forge target: {}", other)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -204,13 +179,94 @@ pub struct GenerateComplete {
     pub count: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityReport {
+    pub score: u8,
+    pub missing_must_haves: Vec<String>,
+    pub missing_should_haves: Vec<String>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageStatus {
+    Missing,
+    Partial,
+    Covered,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoverageTopic {
+    pub topic: String,
+    pub status: CoverageStatus,
+    pub evidence_message_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoverageReport {
+    pub must_have: Vec<CoverageTopic>,
+    pub should_have: Vec<CoverageTopic>,
+    pub missing_must_haves: usize,
+    pub missing_should_haves: usize,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfidenceFactor {
+    pub name: String,
+    pub max_points: u8,
+    pub points: u8,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfidenceReport {
+    pub score: u8,
+    pub factors: Vec<ConfidenceFactor>,
+    pub blocking_gaps: Vec<String>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerationMetadata {
+    pub session_id: String,
+    pub target: String,
+    pub provider: String,
+    pub model: String,
+    pub quality_json: Option<String>,
+    pub confidence_json: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanningTemplate {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub target_stack: String,
+    pub version: u8,
+    pub seed_prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseImportSummary {
+    pub root_path: String,
+    pub files_scanned: usize,
+    pub files_included: usize,
+    pub total_bytes_read: u64,
+    pub detected_stacks: Vec<String>,
+    pub key_files: Vec<String>,
+    pub summary_markdown: String,
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             llm: LLMConfig {
                 provider: "ollama".to_string(),
-                model: "qwen3-coder:30b-a3b-q4_K_M".to_string(),
+                model: "qwen3-coder:30b-a3b-instruct-q4_K_M".to_string(),
                 base_url: "http://localhost:11434".to_string(),
+                api_key: None,
                 temperature: 0.7,
                 max_tokens: 65536,
             },
@@ -227,6 +283,7 @@ impl Default for AppConfig {
             output: OutputConfig {
                 include_conversation: true,
                 default_save_path: "~/Projects".to_string(),
+                default_target: "generic".to_string(),
             },
         }
     }

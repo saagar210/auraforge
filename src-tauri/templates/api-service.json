@@ -1,0 +1,8 @@
+{
+  "id": "api-service",
+  "name": "API Service",
+  "description": "HTTP service with endpoint contracts, persistence, and operational boundaries.",
+  "target_stack": "Backend API + DB + test strategy",
+  "version": 1,
+  "seed_prompt": "Let's plan your API service with contract-first thinking. We'll define endpoint responsibilities, request/response shapes, persistence strategy, and failure semantics. Start by listing the top 3 API operations your users need first."
+}

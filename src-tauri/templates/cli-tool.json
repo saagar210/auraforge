@@ -1,0 +1,8 @@
+{
+  "id": "cli-tool",
+  "name": "CLI Tool",
+  "description": "Command-line utility with clear command contracts, flags, and failure behavior.",
+  "target_stack": "CLI runtime + tests + package/distribution",
+  "version": 1,
+  "seed_prompt": "Let's shape this CLI around concrete command behavior. We should define command names, arguments/flags, input/output format, and error handling expectations. What's the primary command and what exact output should users see on success?"
+}

@@ -11,18 +11,18 @@ import type {
   AppConfig,
   SearchConfig,
   HealthStatus,
+  PlanningTemplate,
+  CodebaseImportSummary,
   GeneratedDocument,
-  DocumentVersion,
   GenerateProgress,
   GenerateComplete,
   ModelPullProgress,
   OnboardingStep,
-  ProviderCapabilities,
-  PlanningReadiness,
-  ConversationBranch,
-  PlanTemplate,
-  RepoImportContext,
-  BacklogItem,
+  ForgeTarget,
+  QualityReport,
+  CoverageReport,
+  ConfidenceReport,
+  GenerationMetadata,
 } from "../types";
 import { normalizeError } from "../utils/errorMessages";
 import { resolveDefaultPath } from "../utils/paths";
@@ -30,6 +30,7 @@ import { resolveDefaultPath } from "../utils/paths";
 interface ChatState {
   // Sessions
   sessions: Session[];
+  templates: PlanningTemplate[];
   currentSessionId: string | null;
 
   // Messages
@@ -50,6 +51,12 @@ interface ChatState {
   generateProgress: GenerateProgress | null;
   documentsStale: boolean;
   showPreview: boolean;
+  forgeTarget: ForgeTarget;
+  planReadiness: QualityReport | null;
+  planningCoverage: CoverageReport | null;
+  generationConfidence: ConfidenceReport | null;
+  generationMetadata: GenerationMetadata | null;
+  latestImportSummary: CodebaseImportSummary | null;
 
   // Health
   healthStatus: HealthStatus | null;
@@ -67,18 +74,10 @@ interface ChatState {
   showSettings: boolean;
   setShowSettings: (show: boolean) => void;
   showHelp: boolean;
-  showPlanningOps: boolean;
-  setShowPlanningOps: (show: boolean) => void;
   sidebarCollapsed: boolean;
 
   // Config
   config: AppConfig | null;
-  providerCapabilities: ProviderCapabilities | null;
-  planningReadiness: PlanningReadiness | null;
-  branches: ConversationBranch[];
-  templates: PlanTemplate[];
-  repoImportContext: RepoImportContext | null;
-  exportPreview: BacklogItem[];
 
   // Loading
   sessionsLoading: boolean;
@@ -91,6 +90,9 @@ interface ChatState {
   retryLastMessage: () => Promise<void>;
   loadSessions: () => Promise<void>;
   createSession: () => Promise<Session | null>;
+  createSessionFromTemplate: (templateId: string) => Promise<Session | null>;
+  createBranchFromMessage: (messageId?: string) => Promise<Session | null>;
+  loadTemplates: () => Promise<void>;
   selectSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   deleteSessions: (sessionIds: string[]) => Promise<void>;
@@ -112,23 +114,22 @@ interface ChatState {
 
   // Config actions
   loadConfig: () => Promise<AppConfig | null>;
-  loadProviderCapabilities: () => Promise<ProviderCapabilities | null>;
-  loadTemplates: () => Promise<PlanTemplate[]>;
-  importRepositoryContext: (path: string, maxFiles?: number) => Promise<RepoImportContext | null>;
-  loadBranches: () => Promise<ConversationBranch[]>;
-  createBranch: (name: string, baseMessageId?: string | null) => Promise<ConversationBranch | null>;
-  loadIssueExportPreview: () => Promise<BacklogItem[]>;
   updateSearchConfig: (config: SearchConfig) => Promise<void>;
   updateConfig: (config: AppConfig) => Promise<AppConfig | null>;
 
   // Document actions
-  generateDocuments: () => Promise<void>;
-  regenerateDocument: (filename: string) => Promise<void>;
-  getDocumentVersions: (filename: string, limit?: number) => Promise<DocumentVersion[]>;
+  setForgeTarget: (target: ForgeTarget) => void;
+  analyzePlanReadiness: () => Promise<QualityReport | null>;
+  getPlanningCoverage: () => Promise<CoverageReport | null>;
+  getGenerationConfidence: () => Promise<ConfidenceReport | null>;
+  generateDocuments: (options?: {
+    target?: ForgeTarget;
+    force?: boolean;
+  }) => Promise<boolean>;
   loadDocuments: () => Promise<void>;
-  assessPlanningReadiness: () => Promise<PlanningReadiness | null>;
-  checkStale: () => Promise<void>;
+  checkStale: (sessionIdOverride?: string) => Promise<void>;
   setShowPreview: (show: boolean) => void;
+  importCodebaseContext: (rootPath: string) => Promise<CodebaseImportSummary | null>;
 
   // Export actions
   saveToFolder: (folderPath: string) => Promise<string | null>;
@@ -151,6 +152,8 @@ interface ChatState {
 export const useChatStore = create<ChatState>((set, get) => {
   let streamBuffer = "";
   let streamRafId: number | null = null;
+  let cancelSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+  let cancelSafetySessionId: string | null = null;
 
   const flushStreamBuffer = () => {
     if (!streamBuffer) return;
@@ -172,8 +175,20 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
   };
 
+  const clearCancelSafetyTimeout = (sessionId?: string) => {
+    if (sessionId && cancelSafetySessionId !== sessionId) {
+      return;
+    }
+    if (cancelSafetyTimer) {
+      clearTimeout(cancelSafetyTimer);
+    }
+    cancelSafetyTimer = null;
+    cancelSafetySessionId = null;
+  };
+
   return ({
   sessions: [],
+  templates: [],
   currentSessionId: null,
   messages: [],
   isStreaming: false,
@@ -186,6 +201,12 @@ export const useChatStore = create<ChatState>((set, get) => {
   generateProgress: null,
   documentsStale: false,
   showPreview: false,
+  forgeTarget: "generic",
+  planReadiness: null,
+  planningCoverage: null,
+  generationConfidence: null,
+  generationMetadata: null,
+  latestImportSummary: null,
   toast: null,
   healthStatus: null,
   onboardingDismissed: false,
@@ -197,15 +218,8 @@ export const useChatStore = create<ChatState>((set, get) => {
   isFirstSession: true,
   showSettings: false,
   showHelp: false,
-  showPlanningOps: false,
   sidebarCollapsed: false,
   config: null,
-  providerCapabilities: null,
-  planningReadiness: null,
-  branches: [],
-  templates: [],
-  repoImportContext: null,
-  exportPreview: [],
   sessionsLoading: false,
   messagesLoading: false,
   preferencesLoaded: false,
@@ -213,7 +227,6 @@ export const useChatStore = create<ChatState>((set, get) => {
   _unlisteners: [],
 
   setShowSettings: (show: boolean) => set({ showSettings: show }),
-  setShowPlanningOps: (show: boolean) => set({ showPlanningOps: show }),
 
   checkHealth: async () => {
     try {
@@ -231,6 +244,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   retryLastMessage: async () => {
     const { messages, currentSessionId, isStreaming } = get();
     if (!currentSessionId || isStreaming) return;
+    clearCancelSafetyTimeout(currentSessionId);
 
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
     if (!lastUserMsg) return;
@@ -267,6 +281,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         searchQuery: null,
         searchResults: null,
       });
+      void get().getPlanningCoverage();
     } catch (e) {
       if (get().currentSessionId === currentSessionId) {
         set({
@@ -304,14 +319,101 @@ export const useChatStore = create<ChatState>((set, get) => {
         documents: [],
         showPreview: false,
         documentsStale: false,
-        planningReadiness: null,
-        branches: [],
-        exportPreview: [],
+        planReadiness: null,
+        planningCoverage: null,
+        generationConfidence: null,
+        generationMetadata: null,
+        latestImportSummary: null,
       }));
       return session;
     } catch (e) {
       console.error("Failed to create session:", e);
       return null;
+    }
+  },
+
+  createSessionFromTemplate: async (templateId: string) => {
+    try {
+      const session = await invoke<Session>("create_session_from_template", {
+        request: { template_id: templateId, name: null },
+      });
+
+      set((state) => ({
+        sessions: [session, ...state.sessions.filter((s) => s.id !== session.id)],
+        currentSessionId: session.id,
+        messages: [],
+        messagesLoading: true,
+        streamingContent: "",
+        streamError: null,
+        isStreaming: false,
+        searchQuery: null,
+        searchResults: null,
+        documents: [],
+        showPreview: false,
+        documentsStale: false,
+        planReadiness: null,
+        planningCoverage: null,
+        generationConfidence: null,
+        generationMetadata: null,
+        latestImportSummary: null,
+      }));
+
+      const messages = await invoke<Message[]>("get_messages", {
+        session_id: session.id,
+      });
+
+      if (get().currentSessionId === session.id) {
+        set({ messages, messagesLoading: false });
+      }
+      void get().getPlanningCoverage();
+      return session;
+    } catch (e) {
+      console.error("Failed to create session from template:", e);
+      set({ messagesLoading: false });
+      return null;
+    }
+  },
+
+  createBranchFromMessage: async (messageId?: string) => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return null;
+
+    try {
+      const session = await invoke<Session>("create_branch_from_message", {
+        request: {
+          session_id: sessionId,
+          from_message_id: messageId ?? null,
+          name: null,
+        },
+      });
+      set((state) => ({
+        sessions: [session, ...state.sessions.filter((s) => s.id !== session.id)],
+      }));
+      await get().selectSession(session.id);
+      set({
+        toast: {
+          message: `Created branch: ${session.name}`,
+          type: "success",
+        },
+      });
+      return session;
+    } catch (e) {
+      set({
+        toast: {
+          message: normalizeError(e),
+          type: "error",
+        },
+      });
+      return null;
+    }
+  },
+
+  loadTemplates: async () => {
+    try {
+      const templates = await invoke<PlanningTemplate[]>("list_templates");
+      set({ templates });
+    } catch (e) {
+      console.error("Failed to load templates:", e);
     }
   },
 
@@ -329,20 +431,21 @@ export const useChatStore = create<ChatState>((set, get) => {
       documents: [],
       showPreview: false,
       documentsStale: false,
-      planningReadiness: null,
-      branches: [],
-      exportPreview: [],
+      planReadiness: null,
+      planningCoverage: null,
+      generationConfidence: null,
+      generationMetadata: null,
+      latestImportSummary: null,
     });
     try {
       const messages = await invoke<Message[]>("get_messages", {
         session_id: sessionId,
       });
       set({ messages, messagesLoading: false });
-      get().assessPlanningReadiness();
 
       // Load cached documents if any
       get().loadDocuments();
-      get().loadBranches();
+      void get().getPlanningCoverage();
     } catch (e) {
       console.error("Failed to load messages:", e);
       set({ messagesLoading: false });
@@ -366,8 +469,16 @@ export const useChatStore = create<ChatState>((set, get) => {
           documents:
             state.currentSessionId === sessionId ? [] : state.documents,
           showPreview: state.currentSessionId === sessionId ? false : state.showPreview,
-          branches: state.currentSessionId === sessionId ? [] : state.branches,
-          exportPreview: state.currentSessionId === sessionId ? [] : state.exportPreview,
+          planReadiness:
+            state.currentSessionId === sessionId ? null : state.planReadiness,
+          planningCoverage:
+            state.currentSessionId === sessionId ? null : state.planningCoverage,
+          generationConfidence:
+            state.currentSessionId === sessionId ? null : state.generationConfidence,
+          generationMetadata:
+            state.currentSessionId === sessionId ? null : state.generationMetadata,
+          latestImportSummary:
+            state.currentSessionId === sessionId ? null : state.latestImportSummary,
         };
       });
       const newId = get().currentSessionId;
@@ -398,8 +509,11 @@ export const useChatStore = create<ChatState>((set, get) => {
           messages: activeDeleted ? [] : state.messages,
           documents: activeDeleted ? [] : state.documents,
           showPreview: activeDeleted ? false : state.showPreview,
-          branches: activeDeleted ? [] : state.branches,
-          exportPreview: activeDeleted ? [] : state.exportPreview,
+          planReadiness: activeDeleted ? null : state.planReadiness,
+          planningCoverage: activeDeleted ? null : state.planningCoverage,
+          generationConfidence: activeDeleted ? null : state.generationConfidence,
+          generationMetadata: activeDeleted ? null : state.generationMetadata,
+          latestImportSummary: activeDeleted ? null : state.latestImportSummary,
         };
       });
       const newId = get().currentSessionId;
@@ -431,6 +545,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   sendMessage: async (content: string) => {
     const sessionId = get().currentSessionId;
     if (!sessionId || get().isStreaming) return;
+    clearCancelSafetyTimeout(sessionId);
 
     set({
       isStreaming: true,
@@ -468,7 +583,6 @@ export const useChatStore = create<ChatState>((set, get) => {
         searchQuery: null,
         searchResults: null,
       });
-      get().assessPlanningReadiness();
 
       // Mark documents as stale if they exist
       if (get().documents.length > 0) {
@@ -476,6 +590,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
 
       get().loadSessions();
+      void get().getPlanningCoverage();
     } catch (e) {
       // Only set error if we're still on the same session
       if (get().currentSessionId === sessionId) {
@@ -497,11 +612,18 @@ export const useChatStore = create<ChatState>((set, get) => {
     } catch (e) {
       console.error("Failed to cancel response:", e);
     }
-    // Safety net: if backend fails to emit stream:done/error within 2s, force-reset
-    setTimeout(() => {
-      if (get().isStreaming && get().currentSessionId === sessionId) {
+    // Safety net: if backend fails to emit stream:done/error within 2s, force-reset.
+    clearCancelSafetyTimeout();
+    cancelSafetySessionId = sessionId;
+    cancelSafetyTimer = setTimeout(() => {
+      if (
+        cancelSafetySessionId === sessionId &&
+        get().isStreaming &&
+        get().currentSessionId === sessionId
+      ) {
         set({ isStreaming: false, streamingContent: "" });
       }
+      clearCancelSafetyTimeout(sessionId);
     }, 2000);
   },
 
@@ -591,101 +713,14 @@ export const useChatStore = create<ChatState>((set, get) => {
   loadConfig: async () => {
     try {
       const config = await invoke<AppConfig>("get_config");
-      set({ config });
+      set({
+        config,
+        forgeTarget: config.output.default_target,
+      });
       return config;
     } catch (e) {
       console.error("Failed to load config:", e);
       return null;
-    }
-  },
-
-  loadProviderCapabilities: async () => {
-    try {
-      const capabilities = await invoke<ProviderCapabilities>("get_provider_capabilities");
-      set({ providerCapabilities: capabilities });
-      return capabilities;
-    } catch (e) {
-      console.error("Failed to load provider capabilities:", e);
-      return null;
-    }
-  },
-
-  loadTemplates: async () => {
-    try {
-      const templates = await invoke<PlanTemplate[]>("list_plan_templates");
-      set({ templates });
-      return templates;
-    } catch (e) {
-      console.error("Failed to load templates:", e);
-      return [];
-    }
-  },
-
-  importRepositoryContext: async (path: string, maxFiles = 400) => {
-    try {
-      const context = await invoke<RepoImportContext>("import_repository_context", {
-        request: { path, max_files: maxFiles },
-      });
-      set({ repoImportContext: context });
-      return context;
-    } catch (e) {
-      console.error("Failed to import repository context:", e);
-      return null;
-    }
-  },
-
-  loadBranches: async () => {
-    const sessionId = get().currentSessionId;
-    if (!sessionId) {
-      set({ branches: [] });
-      return [];
-    }
-    try {
-      const branches = await invoke<ConversationBranch[]>("list_branches", {
-        session_id: sessionId,
-      });
-      set({ branches });
-      return branches;
-    } catch (e) {
-      console.error("Failed to load branches:", e);
-      return [];
-    }
-  },
-
-  createBranch: async (name: string, baseMessageId: string | null = null) => {
-    const sessionId = get().currentSessionId;
-    if (!sessionId) return null;
-    try {
-      const branch = await invoke<ConversationBranch>("create_branch", {
-        request: {
-          session_id: sessionId,
-          name,
-          base_message_id: baseMessageId,
-        },
-      });
-      set((state) => ({ branches: [branch, ...state.branches] }));
-      return branch;
-    } catch (e) {
-      console.error("Failed to create branch:", e);
-      return null;
-    }
-  },
-
-  loadIssueExportPreview: async () => {
-    const sessionId = get().currentSessionId;
-    if (!sessionId) {
-      set({ exportPreview: [] });
-      return [];
-    }
-    try {
-      const preview = await invoke<BacklogItem[]>("build_issue_export_preview", {
-        session_id: sessionId,
-      });
-      set({ exportPreview: preview });
-      return preview;
-    } catch (e) {
-      console.error("Failed to build issue export preview:", e);
-      return [];
     }
   },
 
@@ -705,7 +740,10 @@ export const useChatStore = create<ChatState>((set, get) => {
   updateConfig: async (config) => {
     try {
       const updated = await invoke<AppConfig>("update_config", { config });
-      set({ config: updated });
+      set({
+        config: updated,
+        forgeTarget: updated.output.default_target,
+      });
       return updated;
     } catch (e) {
       console.error("Failed to update config:", e);
@@ -715,16 +753,114 @@ export const useChatStore = create<ChatState>((set, get) => {
 
   // ============ DOCUMENT GENERATION ============
 
-  generateDocuments: async () => {
+  setForgeTarget: (target: ForgeTarget) => {
+    set({ forgeTarget: target });
+  },
+
+  analyzePlanReadiness: async () => {
     const sessionId = get().currentSessionId;
-    if (!sessionId || get().isGenerating) return;
+    if (!sessionId) return null;
+
+    try {
+      const report = await invoke<QualityReport>("analyze_plan_readiness", {
+        session_id: sessionId,
+      });
+      set({ planReadiness: report });
+      return report;
+    } catch (e) {
+      console.error("Failed to analyze readiness:", e);
+      return null;
+    }
+  },
+
+  getPlanningCoverage: async () => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return null;
+
+    try {
+      const report = await invoke<CoverageReport>("get_planning_coverage", {
+        session_id: sessionId,
+      });
+      if (get().currentSessionId === sessionId) {
+        set({ planningCoverage: report });
+      }
+      return report;
+    } catch (e) {
+      console.error("Failed to load planning coverage:", e);
+      return null;
+    }
+  },
+
+  getGenerationConfidence: async () => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return null;
+    try {
+      const report = await invoke<ConfidenceReport | null>(
+        "get_generation_confidence",
+        { session_id: sessionId },
+      );
+      set({ generationConfidence: report });
+      return report;
+    } catch (e) {
+      console.error("Failed to load generation confidence:", e);
+      return null;
+    }
+  },
+
+  generateDocuments: async (options) => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId || get().isGenerating) return false;
+    const target = options?.target ?? get().forgeTarget;
+    const force = options?.force ?? false;
 
     set({ isGenerating: true, generateProgress: null, _generatingSessionId: sessionId });
 
     try {
       const documents = await invoke<GeneratedDocument[]>("generate_documents", {
-        request: { session_id: sessionId },
+        request: {
+          session_id: sessionId,
+          target,
+          force,
+        },
       });
+      let generationMetadata: GenerationMetadata | null = null;
+      try {
+        generationMetadata = await invoke<GenerationMetadata | null>(
+          "get_generation_metadata",
+          { session_id: sessionId },
+        );
+      } catch (metaError) {
+        console.warn("Failed to load generation metadata:", metaError);
+      }
+
+      let planReadiness: QualityReport | null = get().planReadiness;
+      if (generationMetadata?.quality_json) {
+        try {
+          planReadiness = JSON.parse(generationMetadata.quality_json) as QualityReport;
+        } catch {
+          // keep previously known readiness
+        }
+      }
+      let generationConfidence: ConfidenceReport | null = get().generationConfidence;
+      if (generationMetadata?.confidence_json) {
+        try {
+          generationConfidence = JSON.parse(
+            generationMetadata.confidence_json,
+          ) as ConfidenceReport;
+        } catch {
+          // keep previously known confidence
+        }
+      } else {
+        try {
+          generationConfidence = await invoke<ConfidenceReport | null>(
+            "get_generation_confidence",
+            { session_id: sessionId },
+          );
+        } catch {
+          // ignore confidence lookup failures
+        }
+      }
+
       // If user is still on the same session, show the documents
       if (get().currentSessionId === sessionId) {
         set({
@@ -734,6 +870,9 @@ export const useChatStore = create<ChatState>((set, get) => {
           documentsStale: false,
           showPreview: true,
           _generatingSessionId: null,
+          generationMetadata,
+          planReadiness,
+          generationConfidence,
         });
       } else {
         // User switched away — docs are in DB, loadDocuments() will pick them up on navigate-back
@@ -743,6 +882,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           _generatingSessionId: null,
         });
       }
+      return true;
     } catch (e) {
       console.error("Failed to generate documents:", e);
       set({
@@ -753,46 +893,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           ? `Document generation failed: ${normalizeError(e)}`
           : null,
       });
-    }
-  },
-
-  regenerateDocument: async (filename: string) => {
-    const sessionId = get().currentSessionId;
-    if (!sessionId || get().isGenerating) return;
-    set({ isGenerating: true, _generatingSessionId: sessionId });
-    try {
-      await invoke<GeneratedDocument>("regenerate_document", {
-        request: { session_id: sessionId, filename },
-      });
-      await get().loadDocuments();
-      set({
-        isGenerating: false,
-        _generatingSessionId: null,
-        documentsStale: false,
-      });
-    } catch (e) {
-      console.error("Failed to regenerate document:", e);
-      set({
-        isGenerating: false,
-        _generatingSessionId: null,
-        streamError: `Document regeneration failed: ${normalizeError(e)}`,
-      });
-    }
-  },
-
-  getDocumentVersions: async (filename: string, limit = 10) => {
-    const sessionId = get().currentSessionId;
-    if (!sessionId) return [];
-    try {
-      const versions = await invoke<DocumentVersion[]>("get_document_versions", {
-        session_id: sessionId,
-        filename,
-        limit,
-      });
-      return versions;
-    } catch (e) {
-      console.error("Failed to load document versions:", e);
-      return [];
+      return false;
     }
   },
 
@@ -804,46 +905,111 @@ export const useChatStore = create<ChatState>((set, get) => {
       const documents = await invoke<GeneratedDocument[]>("get_documents", {
         session_id: sessionId,
       });
-      if (documents.length > 0) {
-        set({ documents });
-        // Check staleness
-        get().checkStale();
+      let generationMetadata: GenerationMetadata | null = null;
+      try {
+        generationMetadata = await invoke<GenerationMetadata | null>(
+          "get_generation_metadata",
+          { session_id: sessionId },
+        );
+      } catch (metaError) {
+        console.warn("Failed to load generation metadata:", metaError);
       }
+      let planReadiness: QualityReport | null = null;
+      if (generationMetadata?.quality_json) {
+        try {
+          planReadiness = JSON.parse(generationMetadata.quality_json) as QualityReport;
+        } catch {
+          // Ignore malformed metadata and continue with documents
+        }
+      }
+      let generationConfidence: ConfidenceReport | null = null;
+      if (generationMetadata?.confidence_json) {
+        try {
+          generationConfidence = JSON.parse(
+            generationMetadata.confidence_json,
+          ) as ConfidenceReport;
+        } catch {
+          // Ignore malformed metadata and continue with documents
+        }
+      } else {
+        try {
+          generationConfidence = await invoke<ConfidenceReport | null>(
+            "get_generation_confidence",
+            { session_id: sessionId },
+          );
+        } catch {
+          // ignore confidence lookup failures
+        }
+      }
+      if (get().currentSessionId !== sessionId) {
+        return;
+      }
+      set({
+        documents,
+        documentsStale: false,
+        generationMetadata,
+        planReadiness,
+        generationConfidence,
+      });
+      // Check staleness for this same session in the background.
+      void get().checkStale(sessionId);
     } catch (e) {
       console.error("Failed to load documents:", e);
     }
   },
 
-  checkStale: async () => {
-    const sessionId = get().currentSessionId;
+  checkStale: async (sessionIdOverride?: string) => {
+    const sessionId = sessionIdOverride ?? get().currentSessionId;
     if (!sessionId) return;
 
     try {
       const stale = await invoke<boolean>("check_documents_stale", {
         session_id: sessionId,
       });
+      if (get().currentSessionId !== sessionId) {
+        return;
+      }
       set({ documentsStale: stale });
     } catch (e) {
       console.error("Failed to check staleness:", e);
     }
   },
 
-  assessPlanningReadiness: async () => {
+  setShowPreview: (show: boolean) => set({ showPreview: show }),
+
+  importCodebaseContext: async (rootPath: string) => {
     const sessionId = get().currentSessionId;
     if (!sessionId) return null;
+
     try {
-      const readiness = await invoke<PlanningReadiness>("assess_planning_readiness", {
+      const summary = await invoke<CodebaseImportSummary>("import_codebase_context", {
+        request: { session_id: sessionId, root_path: rootPath },
+      });
+      const messages = await invoke<Message[]>("get_messages", {
         session_id: sessionId,
       });
-      set({ planningReadiness: readiness });
-      return readiness;
+      if (get().currentSessionId === sessionId) {
+        set({
+          messages,
+          latestImportSummary: summary,
+          toast: {
+            message: `Imported ${summary.files_included} files of codebase context`,
+            type: "success",
+          },
+        });
+      }
+      void get().getPlanningCoverage();
+      return summary;
     } catch (e) {
-      console.error("Failed to assess planning readiness:", e);
+      set({
+        toast: {
+          message: normalizeError(e),
+          type: "error",
+        },
+      });
       return null;
     }
   },
-
-  setShowPreview: (show: boolean) => set({ showPreview: show }),
 
   // ============ EXPORT ============
 
@@ -920,6 +1086,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       const { session_id } = event.payload;
       const current = get().currentSessionId;
       if (session_id && current && session_id !== current) return;
+      clearCancelSafetyTimeout(session_id);
       flushStreamBuffer();
       set({
         isStreaming: false,
@@ -935,6 +1102,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       const { session_id } = event.payload;
       const current = get().currentSessionId;
       if (session_id && current && session_id !== current) return;
+      clearCancelSafetyTimeout(session_id);
       flushStreamBuffer();
       set({
         isStreaming: false,
@@ -1045,6 +1213,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   },
 
   cleanupEventListeners: () => {
+    clearCancelSafetyTimeout();
     if (streamRafId !== null && typeof cancelAnimationFrame === "function") {
       cancelAnimationFrame(streamRafId);
     }

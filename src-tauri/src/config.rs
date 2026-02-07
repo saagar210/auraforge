@@ -9,9 +9,10 @@ const DEFAULT_CONFIG_YAML: &str = r#"# AuraForge Configuration
 
 # LLM Provider Settings
 llm:
-  provider: ollama                          # ollama | anthropic | openai
-  model: qwen3-coder:30b-a3b-q4_K_M
-  base_url: http://localhost:11434          # Ollama default
+  provider: ollama                          # ollama | openai_compatible
+  model: qwen3-coder:30b-a3b-instruct-q4_K_M
+  base_url: http://localhost:11434          # Ollama default (LM Studio commonly uses :1234)
+  api_key: ""                               # optional for openai_compatible runtimes
   temperature: 0.7
   max_tokens: 65536
 
@@ -31,6 +32,7 @@ ui:
 output:
   include_conversation: true                # Include CONVERSATION.md
   default_save_path: ~/Projects             # Default folder picker location
+  default_target: generic                   # claude | codex | cursor | gemini | generic
 "#;
 
 pub fn auraforge_dir() -> PathBuf {
@@ -81,9 +83,18 @@ pub fn load_or_create_config() -> (AppConfig, Option<String>) {
     };
 
     match serde_yaml::from_str::<AppConfig>(&content) {
-        Ok(config) => {
+        Ok(mut config) => {
+            let normalized = normalize_local_model_config(&mut config);
             if let Err(e) = validate_config(&config) {
                 return (AppConfig::default(), Some(e.to_string()));
+            }
+            if normalized {
+                if let Err(err) = save_config(&config) {
+                    log::warn!(
+                        "Failed to persist normalized local-model config defaults: {}",
+                        err
+                    );
+                }
             }
             (config, None)
         }
@@ -134,9 +145,9 @@ pub fn save_config(config: &AppConfig) -> Result<(), String> {
 
 fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
     let llm_provider = config.llm.provider.as_str();
-    if !["ollama", "anthropic", "openai"].contains(&llm_provider) {
+    if !["ollama", "openai_compatible"].contains(&llm_provider) {
         return Err(ConfigError::InvalidValue(format!(
-            "llm.provider={}",
+            "llm.provider={} (expected 'ollama' or 'openai_compatible')",
             config.llm.provider
         )));
     }
@@ -169,7 +180,7 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
 
     if config.search.enabled
         && search_provider == "tavily"
-        && config.search.tavily_api_key.is_empty()
+        && config.search.tavily_api_key.trim().is_empty()
     {
         return Err(ConfigError::MissingField(
             "search.tavily_api_key".to_string(),
@@ -197,6 +208,40 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
             "output.default_save_path".to_string(),
         ));
     }
+    let target = config.output.default_target.as_str();
+    if !["claude", "codex", "cursor", "gemini", "generic"].contains(&target) {
+        return Err(ConfigError::InvalidValue(format!(
+            "output.default_target={}",
+            config.output.default_target
+        )));
+    }
 
     Ok(())
+}
+
+fn normalize_local_model_config(config: &mut AppConfig) -> bool {
+    let mut changed = false;
+
+    let provider = config.llm.provider.trim().to_ascii_lowercase();
+    let normalized_provider = match provider.as_str() {
+        "ollama" => "ollama",
+        "openai_compatible" | "openai-compatible" | "lmstudio" => "openai_compatible",
+        _ => "ollama",
+    };
+    if config.llm.provider != normalized_provider {
+        config.llm.provider = normalized_provider.to_string();
+        changed = true;
+    }
+
+    if config
+        .llm
+        .api_key
+        .as_deref()
+        .is_some_and(|key| key.trim().is_empty())
+    {
+        config.llm.api_key = None;
+        changed = true;
+    }
+
+    changed
 }

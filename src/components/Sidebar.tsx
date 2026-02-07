@@ -5,13 +5,16 @@ import {
   MessageSquare,
   Settings,
   HelpCircle,
-  Sparkles,
   CheckSquare,
   Square,
   XCircle,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useChatStore } from "../stores/chatStore";
+import type { CoverageStatus } from "../types";
 
 export function Sidebar() {
   const {
@@ -24,8 +27,13 @@ export function Sidebar() {
     renameSession,
     setShowSettings,
     setShowHelp,
-    setShowPlanningOps,
     sidebarCollapsed,
+    planningCoverage,
+    getPlanningCoverage,
+    sendMessage,
+    importCodebaseContext,
+    isStreaming,
+    isGenerating,
   } = useChatStore();
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -38,6 +46,13 @@ export function Sidebar() {
   // Inline rename state
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [coverageExpanded, setCoverageExpanded] = useState(true);
+
+  useEffect(() => {
+    if (currentSessionId) {
+      void getPlanningCoverage();
+    }
+  }, [currentSessionId, getPlanningCoverage]);
 
   useEffect(() => {
     return () => {
@@ -156,6 +171,38 @@ export function Sidebar() {
   }
 
   const allSelected = sessions.length > 0 && selectedIds.size === sessions.length;
+  const missingMustHave = planningCoverage
+    ? planningCoverage.must_have.filter((topic) => topic.status === "missing")
+    : [];
+  const nextMissing = missingMustHave[0];
+
+  const statusClass = (status: CoverageStatus) => {
+    switch (status) {
+      case "covered":
+        return "text-status-success bg-status-success/10 border-status-success/30";
+      case "partial":
+        return "text-status-warning bg-status-warning/10 border-status-warning/30";
+      default:
+        return "text-status-error bg-status-error/10 border-status-error/30";
+    }
+  };
+
+  const sendCoveragePrompt = async (topic: string) => {
+    await sendMessage(
+      `Let's close this planning gap: ${topic}. Ask me 1-2 concrete questions so we can finalize it.`,
+    );
+  };
+
+  const handleImportCodebase = async () => {
+    if (!currentSessionId) return;
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: "Select a local codebase to import",
+    });
+    if (typeof selected !== "string" || !selected) return;
+    await importCodebaseContext(selected);
+  };
 
   return (
     <aside
@@ -223,6 +270,60 @@ export function Sidebar() {
           </div>
         )}
       </div>
+
+      {/* Planning Coverage */}
+      {planningCoverage && (
+        <section className="px-3 pt-2 pb-1">
+          <div className="rounded-lg border border-border-subtle bg-surface/40">
+            <button
+              onClick={() => setCoverageExpanded((value) => !value)}
+              aria-label={coverageExpanded ? "Collapse planning coverage" : "Expand planning coverage"}
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-left bg-transparent border-none cursor-pointer"
+            >
+              {coverageExpanded ? (
+                <ChevronDown className="w-3.5 h-3.5 text-text-muted" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 text-text-muted" aria-hidden="true" />
+              )}
+              <span className="text-xs font-semibold text-text-primary tracking-wide">
+                Planning Coverage
+              </span>
+              <span className="ml-auto text-[11px] text-text-muted">
+                {planningCoverage.missing_must_haves} missing must-have
+              </span>
+            </button>
+            {coverageExpanded && (
+              <div className="px-3 pb-3 space-y-2">
+                <div className="space-y-1">
+                  {planningCoverage.must_have.map((topic) => (
+                    <div key={topic.topic} className="flex items-start gap-2">
+                      <span
+                        className={clsx(
+                          "mt-0.5 px-1.5 py-0.5 rounded border text-[10px] font-semibold uppercase tracking-wide",
+                          statusClass(topic.status),
+                        )}
+                      >
+                        {topic.status}
+                      </span>
+                      <p className="text-[11px] leading-tight text-text-secondary">{topic.topic}</p>
+                    </div>
+                  ))}
+                </div>
+                {nextMissing && (
+                  <button
+                    onClick={() => void sendCoveragePrompt(nextMissing.topic)}
+                    disabled={isStreaming || isGenerating}
+                    aria-label={`Ask about ${nextMissing.topic}`}
+                    className="w-full px-2.5 py-2 rounded-md text-[11px] font-medium text-accent-gold border border-accent-gold/40 bg-transparent hover:bg-accent-gold/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Ask About Next Missing Topic
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Session List */}
       <nav className="flex-1 overflow-y-auto px-2 py-2" aria-label="Project list">
@@ -343,12 +444,12 @@ export function Sidebar() {
       {/* Footer */}
       <div className="px-4 py-3 border-t border-border-subtle flex items-center gap-3">
         <button
-          onClick={() => setShowPlanningOps(true)}
-          aria-label="Open planning tools"
-          className="flex items-center gap-2 text-text-secondary text-xs hover:text-text-primary transition-colors duration-200 cursor-pointer bg-transparent border-none"
+          onClick={() => void handleImportCodebase()}
+          aria-label="Import local codebase"
+          disabled={!currentSessionId}
+          className="flex items-center gap-2 text-text-secondary text-xs hover:text-text-primary transition-colors duration-200 cursor-pointer bg-transparent border-none disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          <Sparkles className="w-4 h-4" aria-hidden="true" />
-          <span>Tools</span>
+          <span>Import Repo</span>
         </button>
         <button
           onClick={() => setShowSettings(true)}

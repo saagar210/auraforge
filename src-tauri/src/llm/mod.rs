@@ -4,13 +4,12 @@ use std::sync::Arc;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tauri::Emitter;
 use tokio::time::{timeout, Duration};
 
 use crate::error::AppError;
 use crate::search::SearchResult;
-use crate::types::AppConfig;
+use crate::types::{AppConfig, LLMConfig};
 
 #[derive(Debug, Deserialize)]
 struct OllamaTagsResponse {
@@ -35,6 +34,57 @@ struct OllamaOptions {
     temperature: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     num_predict: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiModelsResponse {
+    data: Vec<OpenAiModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiModel {
+    id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct OpenAiChatRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    stream: bool,
+    temperature: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiChatResponse {
+    choices: Vec<OpenAiChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiChoice {
+    message: OpenAiChatMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiChatMessage {
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiStreamResponse {
+    choices: Vec<OpenAiStreamChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiStreamChoice {
+    delta: OpenAiStreamDelta,
+    finish_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiStreamDelta {
+    content: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,58 +112,6 @@ struct OllamaChatResponse {
 #[derive(Debug, Deserialize)]
 struct OllamaChatResponseMessage {
     content: String,
-}
-
-#[derive(Debug, Serialize)]
-struct OpenAiChatRequest<'a> {
-    model: &'a str,
-    messages: Vec<ChatMessage>,
-    temperature: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_tokens: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiChatResponse {
-    choices: Vec<OpenAiChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiChoice {
-    message: OpenAiChoiceMessage,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiChoiceMessage {
-    content: String,
-}
-
-#[derive(Debug, Serialize)]
-struct AnthropicMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Debug, Serialize)]
-struct AnthropicRequest<'a> {
-    model: &'a str,
-    max_tokens: u64,
-    temperature: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
-    messages: Vec<AnthropicMessage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AnthropicResponse {
-    content: Vec<AnthropicContentBlock>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AnthropicContentBlock {
-    #[serde(rename = "type")]
-    block_type: String,
-    text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -164,83 +162,48 @@ impl OllamaClient {
         }
     }
 
-    fn resolve_provider_base_url(&self, provider: &str, configured: &str) -> String {
-        let trimmed = configured.trim();
-        let looks_local = trimmed.contains("localhost") || trimmed.contains("127.0.0.1");
-        match provider {
-            "openai" => {
-                if trimmed.is_empty() || looks_local {
-                    "https://api.openai.com/v1".to_string()
-                } else {
-                    trimmed.to_string()
-                }
-            }
-            "anthropic" => {
-                if trimmed.is_empty() || looks_local {
-                    "https://api.anthropic.com/v1".to_string()
-                } else {
-                    trimmed.to_string()
-                }
-            }
-            _ => trimmed.to_string(),
-        }
+    fn endpoint(base_url: &str, path: &str) -> String {
+        format!(
+            "{}/{}",
+            base_url.trim_end_matches('/'),
+            path.trim_start_matches('/')
+        )
     }
 
-    fn provider_api_key(provider: &str) -> Option<String> {
-        match provider {
-            "openai" => std::env::var("OPENAI_API_KEY").ok(),
-            "anthropic" => std::env::var("ANTHROPIC_API_KEY").ok(),
-            _ => None,
-        }
-    }
-
-    pub fn provider_supported(&self, provider: &str) -> Result<(), AppError> {
-        match provider {
-            "ollama" => Ok(()),
-            "openai" => {
-                if Self::provider_api_key("openai").is_some() {
-                    Ok(())
-                } else {
-                    Err(AppError::Config(
-                        "OPENAI_API_KEY is required for OpenAI provider".to_string(),
-                    ))
-                }
-            }
-            "anthropic" => {
-                if Self::provider_api_key("anthropic").is_some() {
-                    Ok(())
-                } else {
-                    Err(AppError::Config(
-                        "ANTHROPIC_API_KEY is required for Anthropic provider".to_string(),
-                    ))
-                }
-            }
-            other => Err(AppError::Config(format!(
-                "Unsupported provider '{}'",
-                other
-            ))),
-        }
-    }
-
-    pub async fn list_models_for_provider(
+    fn with_auth(
         &self,
-        provider: &str,
-        base_url: &str,
-    ) -> Result<Vec<String>, AppError> {
-        match provider {
-            "ollama" => self.list_models(base_url).await,
-            "openai" | "anthropic" => Ok(vec![]),
-            other => Err(AppError::Config(format!(
-                "Unsupported provider '{}'",
-                other
-            ))),
+        request: reqwest::RequestBuilder,
+        api_key: Option<&str>,
+    ) -> reqwest::RequestBuilder {
+        if let Some(key) = api_key.filter(|value| !value.trim().is_empty()) {
+            request.bearer_auth(key.trim())
+        } else {
+            request
         }
     }
 
-    pub async fn list_models(&self, base_url: &str) -> Result<Vec<String>, AppError> {
+    fn uses_openai_compatible(provider: &str) -> bool {
+        matches!(
+            provider.trim().to_ascii_lowercase().as_str(),
+            "openai_compatible" | "openai-compatible" | "lmstudio"
+        )
+    }
+
+    pub async fn list_models(&self, config: &LLMConfig) -> Result<Vec<String>, AppError> {
+        if Self::uses_openai_compatible(&config.provider) {
+            return self.list_models_openai(config).await;
+        }
+        if config.provider != "ollama" {
+            return Err(AppError::Validation(format!(
+                "Unsupported local provider '{}'",
+                config.provider
+            )));
+        }
+
+        let base_url = &config.base_url;
         let resp = self
             .client
-            .get(format!("{}/api/tags", base_url))
+            .get(Self::endpoint(base_url, "/api/tags"))
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .await
@@ -264,17 +227,70 @@ impl OllamaClient {
         Ok(tags.models.into_iter().map(|m| m.name).collect())
     }
 
+    async fn list_models_openai(&self, config: &LLMConfig) -> Result<Vec<String>, AppError> {
+        let request = self
+            .client
+            .get(Self::endpoint(&config.base_url, "/v1/models"))
+            .timeout(Duration::from_secs(5));
+        let resp = self
+            .with_auth(request, config.api_key.as_deref())
+            .send()
+            .await
+            .map_err(|e| AppError::OllamaConnection {
+                url: config.base_url.to_string(),
+                message: e.to_string(),
+            })?;
+
+        if !resp.status().is_success() {
+            return Err(AppError::LlmRequest(format!(
+                "OpenAI-compatible endpoint returned {}",
+                resp.status()
+            )));
+        }
+
+        let body: OpenAiModelsResponse = resp.json().await.map_err(|e| {
+            AppError::LlmRequest(format!(
+                "Failed to parse OpenAI-compatible models response: {}",
+                e
+            ))
+        })?;
+
+        Ok(body.data.into_iter().map(|model| model.id).collect())
+    }
+
     pub async fn pull_model(
         &self,
         app: &tauri::AppHandle,
-        base_url: &str,
+        config: &LLMConfig,
         model_name: &str,
     ) -> Result<(), AppError> {
+        if Self::uses_openai_compatible(&config.provider) {
+            let _ = app.emit(
+                "model:pull_progress",
+                ModelPullProgress {
+                    status: "error: model pull not supported for this provider".to_string(),
+                    total: None,
+                    completed: None,
+                },
+            );
+            return Err(AppError::Validation(
+                "Model pull is only supported for Ollama. Load models directly in your local runtime."
+                    .to_string(),
+            ));
+        }
+        if config.provider != "ollama" {
+            return Err(AppError::Validation(format!(
+                "Unsupported local provider '{}'",
+                config.provider
+            )));
+        }
+
+        let base_url = &config.base_url;
         self.pull_cancelled.store(false, Ordering::SeqCst);
 
         let response = self
             .client
-            .post(format!("{}/api/pull", base_url))
+            .post(Self::endpoint(base_url, "/api/pull"))
             .json(&OllamaPullRequest {
                 name: model_name.to_string(),
                 stream: true,
@@ -303,6 +319,7 @@ impl OllamaClient {
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
+        let mut completed = false;
 
         while let Some(chunk) = timeout(Duration::from_secs(120), stream.next())
             .await
@@ -356,190 +373,173 @@ impl OllamaClient {
                         );
 
                         if status == "success" {
-                            return Ok(());
+                            completed = true;
+                            break;
                         }
                     }
                     Err(_) => continue,
                 }
             }
+
+            if completed {
+                break;
+            }
         }
 
-        Ok(())
+        if !completed {
+            let remaining = buffer.trim();
+            if !remaining.is_empty() {
+                if let Ok(parsed) = serde_json::from_str::<OllamaPullResponse>(remaining) {
+                    if let Some(ref err) = parsed.error {
+                        let _ = app.emit(
+                            "model:pull_progress",
+                            ModelPullProgress {
+                                status: format!("error: {}", err),
+                                total: None,
+                                completed: None,
+                            },
+                        );
+                        return Err(AppError::LlmRequest(err.clone()));
+                    }
+                    if let Some(status) = parsed.status {
+                        let _ = app.emit(
+                            "model:pull_progress",
+                            ModelPullProgress {
+                                status: status.clone(),
+                                total: parsed.total,
+                                completed: parsed.completed,
+                            },
+                        );
+                        if status == "success" {
+                            completed = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if self.pull_cancelled.load(Ordering::SeqCst) {
+            let _ = app.emit(
+                "model:pull_progress",
+                ModelPullProgress {
+                    status: "cancelled".to_string(),
+                    total: None,
+                    completed: None,
+                },
+            );
+            return Err(AppError::StreamCancelled);
+        }
+
+        if completed {
+            Ok(())
+        } else {
+            let _ = app.emit(
+                "model:pull_progress",
+                ModelPullProgress {
+                    status: "error: stream interrupted".to_string(),
+                    total: None,
+                    completed: None,
+                },
+            );
+            Err(AppError::StreamInterrupted)
+        }
     }
 
     pub fn cancel_pull(&self) {
         self.pull_cancelled.store(true, Ordering::SeqCst);
     }
 
-    pub async fn check_connection(&self, base_url: &str) -> Result<bool, AppError> {
+    pub async fn check_connection(&self, config: &LLMConfig) -> Result<bool, AppError> {
+        if Self::uses_openai_compatible(&config.provider) {
+            let request = self
+                .client
+                .get(Self::endpoint(&config.base_url, "/v1/models"))
+                .timeout(std::time::Duration::from_secs(5));
+            let resp = self
+                .with_auth(request, config.api_key.as_deref())
+                .send()
+                .await
+                .map_err(|e| AppError::OllamaConnection {
+                    url: config.base_url.to_string(),
+                    message: e.to_string(),
+                })?;
+            return Ok(resp.status().is_success());
+        }
+
         let resp = self
             .client
-            .get(format!("{}/api/tags", base_url))
+            .get(Self::endpoint(&config.base_url, "/api/tags"))
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .await
             .map_err(|e| AppError::OllamaConnection {
-                url: base_url.to_string(),
+                url: config.base_url.to_string(),
                 message: e.to_string(),
             })?;
         Ok(resp.status().is_success())
     }
 
-    pub async fn check_model(&self, base_url: &str, model: &str) -> Result<bool, AppError> {
-        let resp = self
-            .client
-            .get(format!("{}/api/tags", base_url))
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await
-            .map_err(|e| AppError::OllamaConnection {
-                url: base_url.to_string(),
-                message: e.to_string(),
-            })?;
-
-        if !resp.status().is_success() {
-            return Ok(false);
+    pub async fn check_model(&self, config: &LLMConfig, model: &str) -> Result<bool, AppError> {
+        let models = self.list_models(config).await?;
+        if Self::uses_openai_compatible(&config.provider) {
+            return Ok(models.iter().any(|candidate| candidate == model));
         }
 
-        let tags: OllamaTagsResponse = resp
-            .json()
-            .await
-            .map_err(|e| AppError::LlmRequest(format!("Failed to parse Ollama response: {}", e)))?;
-
         let model_base = model.split(':').next().unwrap_or(model);
-        Ok(tags.models.iter().any(|m| {
-            m.name == model
-                || (!model.contains(':') && m.name.starts_with(&format!("{}:", model_base)))
+        Ok(models.iter().any(|candidate| {
+            candidate == model
+                || (!model.contains(':') && candidate.starts_with(&format!("{}:", model_base)))
         }))
     }
 
     pub async fn health_check(&self, config: &AppConfig) -> (bool, bool) {
-        match config.llm.provider.as_str() {
-            "ollama" => {
-                let connected = self
-                    .check_connection(&config.llm.base_url)
-                    .await
-                    .unwrap_or(false);
+        let connected = self.check_connection(&config.llm).await.unwrap_or(false);
 
-                let model_available = if connected {
-                    self.check_model(&config.llm.base_url, &config.llm.model)
-                        .await
-                        .unwrap_or(false)
-                } else {
-                    false
-                };
+        let model_available = if connected {
+            self.check_model(&config.llm, &config.llm.model)
+                .await
+                .unwrap_or(false)
+        } else {
+            false
+        };
 
-                (connected, model_available)
-            }
-            "openai" => {
-                let key = match Self::provider_api_key("openai") {
-                    Some(k) => k,
-                    None => return (false, false),
-                };
-                let base_url = self.resolve_provider_base_url("openai", &config.llm.base_url);
-                let connected = self
-                    .client
-                    .get(format!("{}/models", base_url))
-                    .bearer_auth(key)
-                    .timeout(std::time::Duration::from_secs(8))
-                    .send()
-                    .await
-                    .map(|r| r.status().is_success())
-                    .unwrap_or(false);
-                (connected, connected)
-            }
-            "anthropic" => {
-                let key = match Self::provider_api_key("anthropic") {
-                    Some(k) => k,
-                    None => return (false, false),
-                };
-                let base_url = self.resolve_provider_base_url("anthropic", &config.llm.base_url);
-                let connected = self
-                    .client
-                    .post(format!("{}/messages", base_url))
-                    .header("x-api-key", key)
-                    .header("anthropic-version", "2023-06-01")
-                    .json(&json!({
-                        "model": config.llm.model,
-                        "max_tokens": 1,
-                        "messages": [{"role":"user","content":"ping"}]
-                    }))
-                    .timeout(std::time::Duration::from_secs(8))
-                    .send()
-                    .await
-                    .map(|r| {
-                        r.status().is_success() || r.status() == reqwest::StatusCode::BAD_REQUEST
-                    })
-                    .unwrap_or(false);
-                (connected, connected)
-            }
-            _ => (false, false),
-        }
+        (connected, model_available)
     }
 
     #[allow(clippy::too_many_arguments)]
     pub async fn stream_chat(
         &self,
         app: &tauri::AppHandle,
-        provider: &str,
-        base_url: &str,
-        model: &str,
+        config: &LLMConfig,
         messages: Vec<ChatMessage>,
         temperature: f64,
         num_predict: Option<u64>,
         session_id: &str,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String, AppError> {
-        self.provider_supported(provider)?;
-        if provider != "ollama" {
-            let text = self
-                .generate_with_provider(
-                    provider,
-                    base_url,
-                    model,
+        if Self::uses_openai_compatible(&config.provider) {
+            return self
+                .stream_chat_openai(
+                    app,
+                    config,
                     messages,
                     temperature,
                     num_predict,
+                    session_id,
+                    cancel,
                 )
-                .await?;
-
-            if let Some(flag) = &cancel {
-                if flag.load(Ordering::SeqCst) {
-                    let _ = app.emit(
-                        "stream:done",
-                        StreamChunk {
-                            r#type: "done".to_string(),
-                            session_id: Some(session_id.to_string()),
-                            ..Default::default()
-                        },
-                    );
-                    return Err(AppError::StreamCancelled);
-                }
-            }
-
-            if !text.is_empty() {
-                let _ = app.emit(
-                    "stream:chunk",
-                    StreamChunk {
-                        r#type: "content".to_string(),
-                        content: Some(text.clone()),
-                        session_id: Some(session_id.to_string()),
-                        ..Default::default()
-                    },
-                );
-            }
-            let _ = app.emit(
-                "stream:done",
-                StreamChunk {
-                    r#type: "done".to_string(),
-                    session_id: Some(session_id.to_string()),
-                    ..Default::default()
-                },
-            );
-            return Ok(text);
+                .await;
+        }
+        if config.provider != "ollama" {
+            return Err(AppError::Validation(format!(
+                "Unsupported local provider '{}'",
+                config.provider
+            )));
         }
 
-        let url = format!("{}/api/chat", base_url);
+        let base_url = &config.base_url;
+        let model = &config.model;
+        let url = Self::endpoint(base_url, "/api/chat");
 
         let response = self
             .client
@@ -663,7 +663,35 @@ impl OllamaClient {
                         },
                     );
                 }
+                if parsed.done {
+                    let _ = app.emit(
+                        "stream:done",
+                        StreamChunk {
+                            r#type: "done".to_string(),
+                            session_id: Some(session_id.to_string()),
+                            ..Default::default()
+                        },
+                    );
+                    done = true;
+                }
             }
+        }
+
+        if !done {
+            if let Some(flag) = &cancel {
+                if flag.load(Ordering::SeqCst) {
+                    let _ = app.emit(
+                        "stream:done",
+                        StreamChunk {
+                            r#type: "done".to_string(),
+                            session_id: Some(session_id.to_string()),
+                            ..Default::default()
+                        },
+                    );
+                    return Err(AppError::StreamCancelled);
+                }
+            }
+            return Err(AppError::StreamInterrupted);
         }
 
         Ok(full_response)
@@ -672,54 +700,23 @@ impl OllamaClient {
     /// Non-streaming generation for document creation
     pub async fn generate(
         &self,
-        provider: &str,
-        base_url: &str,
-        model: &str,
+        config: &LLMConfig,
         messages: Vec<ChatMessage>,
         temperature: f64,
     ) -> Result<String, AppError> {
-        self.generate_with_provider(provider, base_url, model, messages, temperature, None)
-            .await
-    }
-
-    async fn generate_with_provider(
-        &self,
-        provider: &str,
-        base_url: &str,
-        model: &str,
-        messages: Vec<ChatMessage>,
-        temperature: f64,
-        max_tokens: Option<u64>,
-    ) -> Result<String, AppError> {
-        self.provider_supported(provider)?;
-        match provider {
-            "ollama" => {
-                self.generate_ollama(base_url, model, messages, temperature)
-                    .await
-            }
-            "openai" => {
-                self.generate_openai(base_url, model, messages, temperature, max_tokens)
-                    .await
-            }
-            "anthropic" => {
-                self.generate_anthropic(base_url, model, messages, temperature, max_tokens)
-                    .await
-            }
-            other => Err(AppError::Config(format!(
-                "Unsupported provider '{}'",
-                other
-            ))),
+        if Self::uses_openai_compatible(&config.provider) {
+            return self.generate_openai(config, messages, temperature).await;
         }
-    }
+        if config.provider != "ollama" {
+            return Err(AppError::Validation(format!(
+                "Unsupported local provider '{}'",
+                config.provider
+            )));
+        }
 
-    async fn generate_ollama(
-        &self,
-        base_url: &str,
-        model: &str,
-        messages: Vec<ChatMessage>,
-        temperature: f64,
-    ) -> Result<String, AppError> {
-        let url = format!("{}/api/chat", base_url);
+        let base_url = &config.base_url;
+        let model = &config.model;
+        let url = Self::endpoint(base_url, "/api/chat");
 
         let response = self
             .client
@@ -763,134 +760,218 @@ impl OllamaClient {
         Ok(body.message.content)
     }
 
-    async fn generate_openai(
+    #[allow(clippy::too_many_arguments)]
+    async fn stream_chat_openai(
         &self,
-        base_url: &str,
-        model: &str,
+        app: &tauri::AppHandle,
+        config: &LLMConfig,
         messages: Vec<ChatMessage>,
         temperature: f64,
         max_tokens: Option<u64>,
+        session_id: &str,
+        cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String, AppError> {
-        let key = Self::provider_api_key("openai").ok_or_else(|| {
-            AppError::Config("OPENAI_API_KEY is required for OpenAI provider".to_string())
-        })?;
-        let resolved = self.resolve_provider_base_url("openai", base_url);
-        let resp = self
+        let request = self
             .client
-            .post(format!("{}/chat/completions", resolved))
-            .bearer_auth(key)
+            .post(Self::endpoint(&config.base_url, "/v1/chat/completions"))
             .json(&OpenAiChatRequest {
-                model,
+                model: config.model.clone(),
                 messages,
+                stream: true,
                 temperature,
                 max_tokens,
             })
-            .timeout(std::time::Duration::from_secs(300))
+            .timeout(Duration::from_secs(300));
+        let response = self
+            .with_auth(request, config.api_key.as_deref())
             .send()
             .await
-            .map_err(|e| AppError::LlmRequest(format!("OpenAI request failed: {}", e)))?;
+            .map_err(|e| AppError::OllamaConnection {
+                url: config.base_url.to_string(),
+                message: e.to_string(),
+            })?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if status == reqwest::StatusCode::NOT_FOUND {
+                return Err(AppError::ModelNotFound {
+                    model: config.model.clone(),
+                });
+            }
             return Err(AppError::LlmRequest(format!(
-                "OpenAI returned {}: {}",
+                "OpenAI-compatible endpoint returned {}: {}",
                 status, body
             )));
         }
 
-        let parsed: OpenAiChatResponse = resp
-            .json()
-            .await
-            .map_err(|e| AppError::LlmRequest(format!("Failed to parse OpenAI response: {}", e)))?;
+        let mut stream = response.bytes_stream();
+        let mut full_response = String::new();
+        let mut buffer = String::new();
+        let mut done = false;
 
-        parsed
-            .choices
-            .first()
-            .map(|c| c.message.content.clone())
-            .ok_or_else(|| AppError::LlmRequest("OpenAI returned no choices".to_string()))
+        while let Some(chunk) = timeout(Duration::from_secs(60), stream.next())
+            .await
+            .map_err(|_| AppError::StreamInterrupted)?
+        {
+            if let Some(flag) = &cancel {
+                if flag.load(Ordering::SeqCst) {
+                    let _ = app.emit(
+                        "stream:done",
+                        StreamChunk {
+                            r#type: "done".to_string(),
+                            session_id: Some(session_id.to_string()),
+                            ..Default::default()
+                        },
+                    );
+                    return Err(AppError::StreamCancelled);
+                }
+            }
+
+            let chunk = chunk.map_err(|_| AppError::StreamInterrupted)?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            while let Some(newline_pos) = buffer.find('\n') {
+                let line = buffer[..newline_pos].trim().to_string();
+                buffer = buffer[newline_pos + 1..].to_string();
+
+                if line.is_empty() || line.starts_with(':') {
+                    continue;
+                }
+                if !line.starts_with("data:") {
+                    continue;
+                }
+
+                let data = line.trim_start_matches("data:").trim();
+                if data == "[DONE]" {
+                    let _ = app.emit(
+                        "stream:done",
+                        StreamChunk {
+                            r#type: "done".to_string(),
+                            session_id: Some(session_id.to_string()),
+                            ..Default::default()
+                        },
+                    );
+                    done = true;
+                    break;
+                }
+
+                match serde_json::from_str::<OpenAiStreamResponse>(data) {
+                    Ok(parsed) => {
+                        for choice in parsed.choices {
+                            if let Some(content) = choice.delta.content {
+                                if !content.is_empty() {
+                                    full_response.push_str(&content);
+                                    let _ = app.emit(
+                                        "stream:chunk",
+                                        StreamChunk {
+                                            r#type: "content".to_string(),
+                                            content: Some(content),
+                                            session_id: Some(session_id.to_string()),
+                                            ..Default::default()
+                                        },
+                                    );
+                                }
+                            }
+                            if choice.finish_reason.is_some() {
+                                let _ = app.emit(
+                                    "stream:done",
+                                    StreamChunk {
+                                        r#type: "done".to_string(),
+                                        session_id: Some(session_id.to_string()),
+                                        ..Default::default()
+                                    },
+                                );
+                                done = true;
+                                break;
+                            }
+                        }
+                    }
+                    Err(_) => continue,
+                }
+            }
+
+            if done {
+                break;
+            }
+        }
+
+        if !done {
+            if let Some(flag) = &cancel {
+                if flag.load(Ordering::SeqCst) {
+                    let _ = app.emit(
+                        "stream:done",
+                        StreamChunk {
+                            r#type: "done".to_string(),
+                            session_id: Some(session_id.to_string()),
+                            ..Default::default()
+                        },
+                    );
+                    return Err(AppError::StreamCancelled);
+                }
+            }
+            return Err(AppError::StreamInterrupted);
+        }
+
+        Ok(full_response)
     }
 
-    async fn generate_anthropic(
+    async fn generate_openai(
         &self,
-        base_url: &str,
-        model: &str,
+        config: &LLMConfig,
         messages: Vec<ChatMessage>,
         temperature: f64,
-        max_tokens: Option<u64>,
     ) -> Result<String, AppError> {
-        let key = Self::provider_api_key("anthropic").ok_or_else(|| {
-            AppError::Config("ANTHROPIC_API_KEY is required for Anthropic provider".to_string())
-        })?;
-        let resolved = self.resolve_provider_base_url("anthropic", base_url);
-        let mut system_segments = Vec::new();
-        let mut api_messages = Vec::new();
-        for msg in messages {
-            if msg.role == "system" {
-                system_segments.push(msg.content);
-                continue;
-            }
-            let role = if msg.role == "assistant" {
-                "assistant"
-            } else {
-                "user"
-            };
-            api_messages.push(AnthropicMessage {
-                role: role.to_string(),
-                content: msg.content,
-            });
-        }
-        if api_messages.is_empty() {
-            api_messages.push(AnthropicMessage {
-                role: "user".to_string(),
-                content: "Continue".to_string(),
-            });
-        }
-
-        let resp = self
+        let request = self
             .client
-            .post(format!("{}/messages", resolved))
-            .header("x-api-key", key)
-            .header("anthropic-version", "2023-06-01")
-            .json(&AnthropicRequest {
-                model,
-                max_tokens: max_tokens.unwrap_or(4096),
+            .post(Self::endpoint(&config.base_url, "/v1/chat/completions"))
+            .json(&OpenAiChatRequest {
+                model: config.model.clone(),
+                messages,
+                stream: false,
                 temperature,
-                system: (!system_segments.is_empty()).then_some(system_segments.join("\n\n")),
-                messages: api_messages,
+                max_tokens: None,
             })
-            .timeout(std::time::Duration::from_secs(300))
+            .timeout(Duration::from_secs(300));
+        let response = self
+            .with_auth(request, config.api_key.as_deref())
             .send()
             .await
-            .map_err(|e| AppError::LlmRequest(format!("Anthropic request failed: {}", e)))?;
+            .map_err(|e| AppError::OllamaConnection {
+                url: config.base_url.to_string(),
+                message: e.to_string(),
+            })?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if status == reqwest::StatusCode::NOT_FOUND {
+                return Err(AppError::ModelNotFound {
+                    model: config.model.clone(),
+                });
+            }
             return Err(AppError::LlmRequest(format!(
-                "Anthropic returned {}: {}",
+                "OpenAI-compatible endpoint returned {}: {}",
                 status, body
             )));
         }
 
-        let parsed: AnthropicResponse = resp.json().await.map_err(|e| {
-            AppError::LlmRequest(format!("Failed to parse Anthropic response: {}", e))
+        let body: OpenAiChatResponse = response.json().await.map_err(|e| {
+            AppError::LlmRequest(format!("Failed to parse OpenAI-compatible response: {}", e))
         })?;
+        let content = body
+            .choices
+            .into_iter()
+            .next()
+            .map(|choice| choice.message.content)
+            .unwrap_or_default();
 
-        let text = parsed
-            .content
-            .iter()
-            .filter(|b| b.block_type == "text")
-            .filter_map(|b| b.text.as_ref())
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        if text.is_empty() {
+        if content.is_empty() {
             return Err(AppError::LlmRequest(
-                "Anthropic returned no text content".to_string(),
+                "OpenAI-compatible endpoint returned an empty response".to_string(),
             ));
         }
-        Ok(text)
+
+        Ok(content)
     }
 }

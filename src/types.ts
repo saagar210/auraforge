@@ -12,6 +12,36 @@ export interface CreateSessionRequest {
   name?: string;
 }
 
+export interface PlanningTemplate {
+  id: string;
+  name: string;
+  description: string;
+  target_stack: string;
+  version: number;
+  seed_prompt: string;
+}
+
+export interface CreateSessionFromTemplateRequest {
+  template_id: string;
+  name?: string;
+}
+
+export interface CreateBranchRequest {
+  session_id: string;
+  from_message_id?: string;
+  name?: string;
+}
+
+export interface CodebaseImportSummary {
+  root_path: string;
+  files_scanned: number;
+  files_included: number;
+  total_bytes_read: number;
+  detected_stacks: string[];
+  key_files: string[];
+  summary_markdown: string;
+}
+
 // Message types
 export interface Message {
   id: string;
@@ -25,7 +55,6 @@ export interface Message {
 export interface MessageMetadata {
   search_query?: string;
   search_results?: SearchResult[];
-  search_timestamp?: string;
   model_used?: string;
   tokens_used?: number;
 }
@@ -76,25 +105,18 @@ export interface GenerateComplete {
 
 export interface GenerateDocumentsRequest {
   session_id: string;
-}
-
-export interface RegenerateDocumentRequest {
-  session_id: string;
-  filename: string;
-}
-
-export interface DocumentVersion {
-  id: string;
-  session_id: string;
-  filename: string;
-  version: number;
-  content: string;
-  created_at: string;
+  target?: ForgeTarget;
+  force?: boolean;
 }
 
 export interface SaveToFolderRequest {
   session_id: string;
   folder_path: string;
+}
+
+export interface ImportCodebaseRequest {
+  session_id: string;
+  root_path: string;
 }
 
 // Config types
@@ -106,22 +128,12 @@ export interface AppConfig {
 }
 
 export interface LLMConfig {
-  provider: 'ollama' | 'anthropic' | 'openai';
+  provider: 'ollama' | 'openai_compatible';
   model: string;
   base_url: string;
+  api_key?: string | null;
   temperature: number;
   max_tokens: number;
-}
-
-export interface ProviderCapability {
-  key: LLMConfig["provider"];
-  supported: boolean;
-  reason?: string | null;
-}
-
-export interface ProviderCapabilities {
-  providers: ProviderCapability[];
-  default_provider: LLMConfig["provider"];
 }
 
 export interface SearchConfig {
@@ -139,6 +151,56 @@ export interface UIConfig {
 export interface OutputConfig {
   include_conversation: boolean;
   default_save_path: string;
+  default_target: ForgeTarget;
+}
+
+export type ForgeTarget = 'claude' | 'codex' | 'cursor' | 'gemini' | 'generic';
+
+export interface QualityReport {
+  score: number;
+  missing_must_haves: string[];
+  missing_should_haves: string[];
+  summary: string;
+}
+
+export type CoverageStatus = 'missing' | 'partial' | 'covered';
+
+export interface CoverageTopic {
+  topic: string;
+  status: CoverageStatus;
+  evidence_message_ids: string[];
+}
+
+export interface CoverageReport {
+  must_have: CoverageTopic[];
+  should_have: CoverageTopic[];
+  missing_must_haves: number;
+  missing_should_haves: number;
+  summary: string;
+}
+
+export interface ConfidenceFactor {
+  name: string;
+  max_points: number;
+  points: number;
+  detail: string;
+}
+
+export interface ConfidenceReport {
+  score: number;
+  factors: ConfidenceFactor[];
+  blocking_gaps: string[];
+  summary: string;
+}
+
+export interface GenerationMetadata {
+  session_id: string;
+  target: ForgeTarget | string;
+  provider: string;
+  model: string;
+  quality_json: string | null;
+  confidence_json: string | null;
+  created_at: string;
 }
 
 // Health check
@@ -155,49 +217,6 @@ export interface ErrorResponse {
   message: string;
   recoverable: boolean;
   action?: string;
-}
-
-export interface CoverageItem {
-  key: string;
-  label: string;
-  status: "covered" | "partial" | "missing";
-}
-
-export interface PlanningReadiness {
-  score: number;
-  must_haves: CoverageItem[];
-  should_haves: CoverageItem[];
-  unresolved_tbd: number;
-  recommendation: string;
-}
-
-export interface ConversationBranch {
-  id: string;
-  session_id: string;
-  name: string;
-  base_message_id?: string | null;
-  created_at: string;
-}
-
-export interface PlanTemplate {
-  id: string;
-  name: string;
-  description: string;
-  tags: string[];
-  prompt_seed: string;
-}
-
-export interface RepoImportContext {
-  root: string;
-  detected_languages: string[];
-  key_files: string[];
-  summary: string;
-}
-
-export interface BacklogItem {
-  title: string;
-  body: string;
-  labels: string[];
 }
 
 // Model management

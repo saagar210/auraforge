@@ -3,9 +3,11 @@ mod config;
 mod db;
 mod docgen;
 mod error;
+mod importer;
 mod llm;
 mod search;
 mod state;
+mod templates;
 mod types;
 
 use std::sync::Mutex;
@@ -173,30 +175,29 @@ pub fn run() {
             commands::cancel_pull_model,
             commands::check_disk_space,
             commands::create_session,
+            commands::create_session_from_template,
+            commands::create_branch_from_message,
             commands::get_sessions,
             commands::get_session,
             commands::update_session,
             commands::delete_session,
             commands::delete_sessions,
+            commands::list_templates,
             commands::get_messages,
             commands::send_message,
             commands::cancel_response,
+            commands::import_codebase_context,
             commands::get_config,
-            commands::get_provider_capabilities,
             commands::update_search_config,
             commands::update_config,
             commands::generate_documents,
-            commands::regenerate_document,
             commands::get_documents,
-            commands::get_document_versions,
-            commands::assess_planning_readiness,
             commands::check_documents_stale,
+            commands::analyze_plan_readiness,
+            commands::get_planning_coverage,
+            commands::get_generation_metadata,
+            commands::get_generation_confidence,
             commands::save_to_folder,
-            commands::create_branch,
-            commands::list_branches,
-            commands::list_plan_templates,
-            commands::import_repository_context,
-            commands::build_issue_export_preview,
             commands::web_search,
         ])
         .run(tauri::generate_context!())

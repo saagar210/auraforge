@@ -22,8 +22,6 @@ import { InfoTooltip } from "./components/InfoTooltip";
 import { Toast } from "./components/Toast";
 import { EmberParticles } from "./components/EmberParticles";
 import { ThermalBackground } from "./components/ThermalBackground";
-import { PlanningReadinessCard } from "./components/PlanningReadinessCard";
-import { PlanningOpsPanel } from "./components/PlanningOpsPanel";
 import { useChatStore } from "./stores/chatStore";
 import type { HealthStatus } from "./types";
 import { friendlyError } from "./utils/errorMessages";
@@ -40,6 +38,7 @@ function App() {
   const {
     currentSessionId,
     messages,
+    templates,
     isStreaming,
     streamingContent,
     streamError,
@@ -51,30 +50,32 @@ function App() {
     generateProgress,
     documentsStale,
     showPreview,
+    forgeTarget,
+    planReadiness,
     healthStatus,
     wizardCompleted,
     preferencesLoaded,
     isFirstSession,
     showSettings,
     showHelp,
-    showPlanningOps,
     config,
-    planningReadiness,
     checkHealth,
     loadPreferences,
     loadConfig,
     setShowSettings,
     setShowHelp,
-    setShowPlanningOps,
     loadSessions,
+    loadTemplates,
     createSession,
+    createSessionFromTemplate,
+    createBranchFromMessage,
     sendMessage,
     cancelResponse,
     clearStreamError,
     retryLastMessage,
+    analyzePlanReadiness,
     generateDocuments,
-    regenerateDocument,
-    getDocumentVersions,
+    setForgeTarget,
     setShowPreview,
     saveToFolder,
     openFolder,
@@ -101,6 +102,7 @@ function App() {
     loadPreferences();
     checkHealth();
     loadSessions();
+    loadTemplates();
     loadConfig();
     initEventListeners();
     return () => cleanupEventListeners();
@@ -186,6 +188,17 @@ function App() {
     await createSession();
   };
 
+  const handleTemplateStart = async (templateId: string) => {
+    await createSessionFromTemplate(templateId);
+  };
+
+  const handleBranchFromMessage = useCallback(
+    async (messageId: string) => {
+      await createBranchFromMessage(messageId);
+    },
+    [createBranchFromMessage],
+  );
+
   const handleSuggestionClick = (text: string) => {
     setInputValue(`I want to build ${text.toLowerCase()}`);
   };
@@ -203,6 +216,39 @@ function App() {
       await saveToFolder(selected);
     }
   }, [config, saveToFolder]);
+
+  const handleForgePlan = useCallback(async (options?: { ignoreThreshold?: boolean }) => {
+    if (
+      !currentSessionId ||
+      isCurrentSessionGenerating ||
+      isStreaming ||
+      (!options?.ignoreThreshold && !canForge)
+    ) {
+      return;
+    }
+    const readiness = await analyzePlanReadiness();
+    if (readiness && readiness.missing_must_haves.length > 0) {
+      const proceed = window.confirm(
+        `Readiness check found missing must-haves:\n\n- ${readiness.missing_must_haves.join(
+          "\n- ",
+        )}\n\nForge anyway with [TBD] sections?`,
+      );
+      if (!proceed) {
+        return;
+      }
+      await generateDocuments({ target: forgeTarget, force: true });
+      return;
+    }
+    await generateDocuments({ target: forgeTarget, force: false });
+  }, [
+    analyzePlanReadiness,
+    canForge,
+    currentSessionId,
+    forgeTarget,
+    generateDocuments,
+    isCurrentSessionGenerating,
+    isStreaming,
+  ]);
 
   const loadOlderMessages = useCallback(() => {
     if (!hasOlderMessages) return;
@@ -242,8 +288,6 @@ function App() {
       if (e.key === "Escape") {
         if (showSettings) {
           setShowSettings(false);
-        } else if (showPlanningOps) {
-          setShowPlanningOps(false);
         } else if (showHelp) {
           setShowHelp(false);
         } else if (showOnboarding) {
@@ -274,7 +318,9 @@ function App() {
       // Cmd+G — Generate documents (forge)
       if (isMod && e.key === "g") {
         e.preventDefault();
-        if (canForge) generateDocuments();
+        if (canForge) {
+          void handleForgePlan();
+        }
         return;
       }
 
@@ -299,12 +345,12 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     canForge,
+    handleForgePlan,
     hasDocuments,
     showSettings,
     showPreview,
     showOnboarding,
     showHelp,
-    showPlanningOps,
   ]);
 
   // Auto-scroll to bottom
@@ -396,9 +442,7 @@ function App() {
               <DocumentPreview
                 documents={documents}
                 stale={documentsStale}
-                onRegenerate={generateDocuments}
-                onRegenerateDocument={regenerateDocument}
-                getDocumentVersions={getDocumentVersions}
+                onRegenerate={() => handleForgePlan({ ignoreThreshold: true })}
                 regenerating={isCurrentSessionGenerating}
                 onSave={handleSaveToFolder}
               />
@@ -421,6 +465,8 @@ function App() {
                         onNewProject={handleNewProject}
                         isFirstSession={isFirstSession}
                         onSuggestionClick={handleSuggestionClick}
+                        templates={templates}
+                        onTemplateSelect={handleTemplateStart}
                       />
                     ) : (
                       <>
@@ -433,7 +479,11 @@ function App() {
                           </button>
                         )}
                         {visibleMessages.map((msg) => (
-                          <ChatMessage key={msg.id} message={msg} />
+                          <ChatMessage
+                            key={msg.id}
+                            message={msg}
+                            onBranch={handleBranchFromMessage}
+                          />
                         ))}
 
                         {/* Streaming response */}
@@ -462,17 +512,21 @@ function App() {
 
                         {/* Forge the Plan button */}
                         {canForge && (
-                          <div className="flex flex-col gap-2">
-                            <PlanningReadinessCard readiness={planningReadiness} />
-                            <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2">
                             <ForgeButton
-                              onClick={generateDocuments}
+                              onClick={handleForgePlan}
                               disabled={!canForge}
                               generating={isCurrentSessionGenerating}
+                              target={forgeTarget}
+                              onTargetChange={setForgeTarget}
                             />
-                            <InfoTooltip text="Generates 5 planning documents from your conversation" />
-                            </div>
+                            <InfoTooltip text="Generates planning docs + model handoff from your conversation" />
                           </div>
+                        )}
+                        {canForge && planReadiness && (
+                          <p className="text-xs text-text-muted text-center">
+                            Readiness: {planReadiness.score}/100
+                          </p>
                         )}
                       </>
                     )}
@@ -530,7 +584,12 @@ function App() {
             )}
           </>
         ) : (
-          <EmptyState hasSession={false} onNewProject={handleNewProject} />
+          <EmptyState
+            hasSession={false}
+            onNewProject={handleNewProject}
+            templates={templates}
+            onTemplateSelect={handleTemplateStart}
+          />
         )}
       </main>
 
@@ -553,16 +612,6 @@ function App() {
 
       {/* Help Panel */}
       <HelpPanel open={showHelp} onClose={() => setShowHelp(false)} />
-
-      {/* Planning Tools */}
-      <PlanningOpsPanel
-        open={showPlanningOps}
-        onClose={() => setShowPlanningOps(false)}
-        onApplyTemplate={(template) => {
-          setInputValue(template.prompt_seed);
-          setShowPlanningOps(false);
-        }}
-      />
 
       {/* Settings Panel */}
       <SettingsPanel

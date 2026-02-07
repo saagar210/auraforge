@@ -1,0 +1,8 @@
+{
+  "id": "saas-web-app",
+  "name": "SaaS Web App",
+  "description": "Multi-tenant web product with auth, billing, and admin workflows.",
+  "target_stack": "React + API + relational DB",
+  "version": 1,
+  "seed_prompt": "Let's plan your SaaS app with clarity from day one. We should define: target users, core workflow, pricing/billing boundaries, and your v1 scope. Start by describing the single most important user outcome this SaaS must deliver."
+}

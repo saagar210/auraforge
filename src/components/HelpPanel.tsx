@@ -62,6 +62,14 @@ export function HelpPanel({ open, onClose }: HelpPanelProps) {
                 <tbody className="divide-y divide-border-subtle">
                   <tr>
                     <td className="py-1.5 pr-3 font-mono text-accent-glow whitespace-nowrap">
+                      START_HERE.md
+                    </td>
+                    <td className="py-1.5 text-text-muted">
+                      Quick start guide and first execution steps
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 pr-3 font-mono text-accent-glow whitespace-nowrap">
                       README.md
                     </td>
                     <td className="py-1.5 text-text-muted">
@@ -90,6 +98,14 @@ export function HelpPanel({ open, onClose }: HelpPanelProps) {
                     </td>
                     <td className="py-1.5 text-text-muted">
                       Prompts to kick off each phase
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 pr-3 font-mono text-accent-glow whitespace-nowrap">
+                      MODEL_HANDOFF.md
+                    </td>
+                    <td className="py-1.5 text-text-muted">
+                      Target-specific execution guidance for coding models
                     </td>
                   </tr>
                   <tr>
@@ -131,8 +147,8 @@ export function HelpPanel({ open, onClose }: HelpPanelProps) {
             <div className="text-sm text-text-secondary pb-3 pl-1">
               Optionally, AuraForge can search the web to provide up-to-date
               information about frameworks, libraries, and best practices. You
-              can use the free DuckDuckGo provider or add a Tavily API key for
-              better results. This is configured in Settings.
+              can use DuckDuckGo, Tavily, or your own SearXNG endpoint.
+              This is configured in Settings.
             </div>
           </details>
 
