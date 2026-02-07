@@ -552,6 +552,20 @@ Scope:
 Status:
 - Completed 2026-02-07.
 
+### Block C: Security and Runtime Hardening (Phase 1)
+
+Objective:
+- Reduce runtime attack surface and remove packaging warnings without changing user workflow.
+
+Scope:
+1. Tighten Tauri CSP by removing unneeded sources (`https:` image source wildcard, websocket connect sources not used by app flow).
+2. Restrict default capability permissions by removing broad plugin defaults and keeping explicit allow-list entries.
+3. Fix bundle identifier format to avoid `.app` suffix warning during macOS packaging.
+4. Re-run full build/test/release gate verification.
+
+Status:
+- Completed 2026-02-07.
+
 ### Block B: Async Race Integration Coverage (Frontend/Tauri)
 
 Objective:
