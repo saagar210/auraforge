@@ -106,6 +106,28 @@ Implemented smallest safe fixes first (highest severity first), each in an isola
 - CSP still broad relative to least-privilege target.
 - No dedicated integration tests for cross-session event races.
 
+## Implementation Addendum (Model-Agnostic Execution Pack)
+
+### New Findings Addressed
+| Area | Severity | Evidence | Fix Strategy | Status |
+|---|---|---|---|---|
+| Correctness & State Safety | High | Forge flow could fail late with opaque backend error when readiness must-haves were missing | Add frontend readiness precheck + explicit user confirmation path that retries with `force=true` | Fixed |
+| Output Consistency | High | Output pack was Claude-skewed and lacked explicit handoff metadata for other coding agents | Add target-aware `MODEL_HANDOFF.md`, persist generation metadata, and include export `manifest.json` | Fixed |
+| UX/Data Integrity | Medium | Document tab rendering depended on a fixed filename list and would hide new docs | Replace rigid mapping with ranked sort + fallback for unknown docs | Fixed |
+| Configuration Robustness | Medium | `output.default_target` and optional `llm.api_key` were not editable in settings | Add full settings support and validation for default target + API key field | Fixed |
+
+### Fixed Issues Summary
+- Added explicit forge targets (`claude`, `codex`, `cursor`, `gemini`, `generic`) end-to-end across config, API types, Rust commands, and frontend state.
+- Added readiness analysis command and confirmation UX to prevent accidental generation of incomplete plans.
+- Added `MODEL_HANDOFF.md` generation with target-specific execution rules and readiness context.
+- Persisted generation metadata in SQLite and emitted `manifest.json` during folder export for reproducible handoffs.
+- Updated preview/help/docs to include model handoff and dynamic document ordering.
+
+### Remaining Risks (Post-Addendum)
+- LLM provider abstraction is still largely Ollama-centric; provider-specific request/auth flows for non-Ollama backends are not yet implemented.
+- No automated frontend tests currently validate readiness confirmation and forced-generation UX.
+- CSP tightening and Windows-specific config replacement hardening remain deferred from the earlier audit pass.
+
 ## Suggested Next Iteration Priorities
 1. Implement and validate Windows-safe config replacement path (`save_config`) with platform-targeted tests.
 2. Tighten CSP directives and verify markdown/render workflows still function.
