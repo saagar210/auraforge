@@ -535,3 +535,19 @@ A roadmap item is complete only when all conditions are true:
 ## 9) Immediate Next Action
 
 Start with **Planning Coverage UI** implementation using section 6.1 exactly as written, then progress sequentially by commit plan in section 7.
+
+## 10) Next Roadmap Block (Post-Merge)
+
+### Block A: Model-Agnostic Export Interop Hardening
+
+Objective:
+- Ensure exported planning packs can be consumed and validated reliably by any coding model/tooling pipeline.
+
+Scope:
+1. Expand `manifest.json` to include deterministic file metadata (`bytes`, `lines`, `sha256`) per document.
+2. Make manifest file ordering deterministic across exports.
+3. Add regression tests for ordering and checksum generation.
+4. Update docs so pack consumers understand validation fields.
+
+Status:
+- Started 2026-02-07.

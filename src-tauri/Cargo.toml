@@ -44,6 +44,7 @@ dirs = "5"
 futures = "0.3"
 log = "0.4"
 libc = "0.2"
+sha2 = "0.10"
 
 # Logging
 tauri-plugin-log = "2"
