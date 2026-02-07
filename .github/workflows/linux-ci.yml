@@ -42,6 +42,7 @@ jobs:
       - name: Frontend checks
         run: |
           npx tsc --noEmit
+          npm run test
           npm run build
 
       - name: Rust checks

@@ -150,6 +150,29 @@ pub struct OllamaClient {
     pull_cancelled: Arc<AtomicBool>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderKind {
+    Ollama,
+    OpenAiCompatible,
+}
+
+impl ProviderKind {
+    fn from_provider(provider: &str) -> Result<Self, AppError> {
+        match provider.trim().to_ascii_lowercase().as_str() {
+            "ollama" => Ok(Self::Ollama),
+            "openai_compatible" | "openai-compatible" | "lmstudio" => Ok(Self::OpenAiCompatible),
+            other => Err(AppError::Validation(format!(
+                "Unsupported local provider '{}'",
+                other
+            ))),
+        }
+    }
+
+    fn from_config(config: &LLMConfig) -> Result<Self, AppError> {
+        Self::from_provider(&config.provider)
+    }
+}
+
 impl OllamaClient {
     pub fn new() -> Self {
         let client = Client::builder()
@@ -182,49 +205,36 @@ impl OllamaClient {
         }
     }
 
-    fn uses_openai_compatible(provider: &str) -> bool {
-        matches!(
-            provider.trim().to_ascii_lowercase().as_str(),
-            "openai_compatible" | "openai-compatible" | "lmstudio"
-        )
-    }
-
     pub async fn list_models(&self, config: &LLMConfig) -> Result<Vec<String>, AppError> {
-        if Self::uses_openai_compatible(&config.provider) {
-            return self.list_models_openai(config).await;
+        match ProviderKind::from_config(config)? {
+            ProviderKind::OpenAiCompatible => self.list_models_openai(config).await,
+            ProviderKind::Ollama => {
+                let base_url = &config.base_url;
+                let resp = self
+                    .client
+                    .get(Self::endpoint(base_url, "/api/tags"))
+                    .timeout(std::time::Duration::from_secs(5))
+                    .send()
+                    .await
+                    .map_err(|e| AppError::OllamaConnection {
+                        url: base_url.to_string(),
+                        message: e.to_string(),
+                    })?;
+
+                if !resp.status().is_success() {
+                    return Err(AppError::LlmRequest(format!(
+                        "Ollama returned {}",
+                        resp.status()
+                    )));
+                }
+
+                let tags: OllamaTagsResponse = resp.json().await.map_err(|e| {
+                    AppError::LlmRequest(format!("Failed to parse Ollama response: {}", e))
+                })?;
+
+                Ok(tags.models.into_iter().map(|m| m.name).collect())
+            }
         }
-        if config.provider != "ollama" {
-            return Err(AppError::Validation(format!(
-                "Unsupported local provider '{}'",
-                config.provider
-            )));
-        }
-
-        let base_url = &config.base_url;
-        let resp = self
-            .client
-            .get(Self::endpoint(base_url, "/api/tags"))
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await
-            .map_err(|e| AppError::OllamaConnection {
-                url: base_url.to_string(),
-                message: e.to_string(),
-            })?;
-
-        if !resp.status().is_success() {
-            return Err(AppError::LlmRequest(format!(
-                "Ollama returned {}",
-                resp.status()
-            )));
-        }
-
-        let tags: OllamaTagsResponse = resp
-            .json()
-            .await
-            .map_err(|e| AppError::LlmRequest(format!("Failed to parse Ollama response: {}", e)))?;
-
-        Ok(tags.models.into_iter().map(|m| m.name).collect())
     }
 
     async fn list_models_openai(&self, config: &LLMConfig) -> Result<Vec<String>, AppError> {
@@ -264,25 +274,22 @@ impl OllamaClient {
         config: &LLMConfig,
         model_name: &str,
     ) -> Result<(), AppError> {
-        if Self::uses_openai_compatible(&config.provider) {
-            let _ = app.emit(
-                "model:pull_progress",
-                ModelPullProgress {
-                    status: "error: model pull not supported for this provider".to_string(),
-                    total: None,
-                    completed: None,
-                },
-            );
-            return Err(AppError::Validation(
-                "Model pull is only supported for Ollama. Load models directly in your local runtime."
-                    .to_string(),
-            ));
-        }
-        if config.provider != "ollama" {
-            return Err(AppError::Validation(format!(
-                "Unsupported local provider '{}'",
-                config.provider
-            )));
+        match ProviderKind::from_config(config)? {
+            ProviderKind::OpenAiCompatible => {
+                let _ = app.emit(
+                    "model:pull_progress",
+                    ModelPullProgress {
+                        status: "error: model pull not supported for this provider".to_string(),
+                        total: None,
+                        completed: None,
+                    },
+                );
+                return Err(AppError::Validation(
+                    "Model pull is only supported for Ollama. Load models directly in your local runtime."
+                        .to_string(),
+                ));
+            }
+            ProviderKind::Ollama => {}
         }
 
         let base_url = &config.base_url;
@@ -450,46 +457,51 @@ impl OllamaClient {
     }
 
     pub async fn check_connection(&self, config: &LLMConfig) -> Result<bool, AppError> {
-        if Self::uses_openai_compatible(&config.provider) {
-            let request = self
-                .client
-                .get(Self::endpoint(&config.base_url, "/v1/models"))
-                .timeout(std::time::Duration::from_secs(5));
-            let resp = self
-                .with_auth(request, config.api_key.as_deref())
-                .send()
-                .await
-                .map_err(|e| AppError::OllamaConnection {
-                    url: config.base_url.to_string(),
-                    message: e.to_string(),
-                })?;
-            return Ok(resp.status().is_success());
+        match ProviderKind::from_config(config)? {
+            ProviderKind::OpenAiCompatible => {
+                let request = self
+                    .client
+                    .get(Self::endpoint(&config.base_url, "/v1/models"))
+                    .timeout(std::time::Duration::from_secs(5));
+                let resp = self
+                    .with_auth(request, config.api_key.as_deref())
+                    .send()
+                    .await
+                    .map_err(|e| AppError::OllamaConnection {
+                        url: config.base_url.to_string(),
+                        message: e.to_string(),
+                    })?;
+                Ok(resp.status().is_success())
+            }
+            ProviderKind::Ollama => {
+                let resp = self
+                    .client
+                    .get(Self::endpoint(&config.base_url, "/api/tags"))
+                    .timeout(std::time::Duration::from_secs(5))
+                    .send()
+                    .await
+                    .map_err(|e| AppError::OllamaConnection {
+                        url: config.base_url.to_string(),
+                        message: e.to_string(),
+                    })?;
+                Ok(resp.status().is_success())
+            }
         }
-
-        let resp = self
-            .client
-            .get(Self::endpoint(&config.base_url, "/api/tags"))
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await
-            .map_err(|e| AppError::OllamaConnection {
-                url: config.base_url.to_string(),
-                message: e.to_string(),
-            })?;
-        Ok(resp.status().is_success())
     }
 
     pub async fn check_model(&self, config: &LLMConfig, model: &str) -> Result<bool, AppError> {
         let models = self.list_models(config).await?;
-        if Self::uses_openai_compatible(&config.provider) {
-            return Ok(models.iter().any(|candidate| candidate == model));
+        match ProviderKind::from_config(config)? {
+            ProviderKind::OpenAiCompatible => Ok(models.iter().any(|candidate| candidate == model)),
+            ProviderKind::Ollama => {
+                let model_base = model.split(':').next().unwrap_or(model);
+                Ok(models.iter().any(|candidate| {
+                    candidate == model
+                        || (!model.contains(':')
+                            && candidate.starts_with(&format!("{}:", model_base)))
+                }))
+            }
         }
-
-        let model_base = model.split(':').next().unwrap_or(model);
-        Ok(models.iter().any(|candidate| {
-            candidate == model
-                || (!model.contains(':') && candidate.starts_with(&format!("{}:", model_base)))
-        }))
     }
 
     pub async fn health_check(&self, config: &AppConfig) -> (bool, bool) {
@@ -517,7 +529,7 @@ impl OllamaClient {
         session_id: &str,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<String, AppError> {
-        if Self::uses_openai_compatible(&config.provider) {
+        if ProviderKind::from_config(config)? == ProviderKind::OpenAiCompatible {
             return self
                 .stream_chat_openai(
                     app,
@@ -529,12 +541,6 @@ impl OllamaClient {
                     cancel,
                 )
                 .await;
-        }
-        if config.provider != "ollama" {
-            return Err(AppError::Validation(format!(
-                "Unsupported local provider '{}'",
-                config.provider
-            )));
         }
 
         let base_url = &config.base_url;
@@ -704,14 +710,8 @@ impl OllamaClient {
         messages: Vec<ChatMessage>,
         temperature: f64,
     ) -> Result<String, AppError> {
-        if Self::uses_openai_compatible(&config.provider) {
+        if ProviderKind::from_config(config)? == ProviderKind::OpenAiCompatible {
             return self.generate_openai(config, messages, temperature).await;
-        }
-        if config.provider != "ollama" {
-            return Err(AppError::Validation(format!(
-                "Unsupported local provider '{}'",
-                config.provider
-            )));
         }
 
         let base_url = &config.base_url;
@@ -973,5 +973,39 @@ impl OllamaClient {
         }
 
         Ok(content)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_kind_accepts_supported_aliases() {
+        assert_eq!(
+            ProviderKind::from_provider("ollama").expect("ollama should parse"),
+            ProviderKind::Ollama
+        );
+        assert_eq!(
+            ProviderKind::from_provider("openai_compatible")
+                .expect("openai_compatible should parse"),
+            ProviderKind::OpenAiCompatible
+        );
+        assert_eq!(
+            ProviderKind::from_provider("openai-compatible")
+                .expect("openai-compatible should parse"),
+            ProviderKind::OpenAiCompatible
+        );
+        assert_eq!(
+            ProviderKind::from_provider("LMStudio").expect("lmstudio alias should parse"),
+            ProviderKind::OpenAiCompatible
+        );
+    }
+
+    #[test]
+    fn provider_kind_rejects_unknown_provider() {
+        let err = ProviderKind::from_provider("remote_cloud")
+            .expect_err("unknown provider should return validation error");
+        assert!(matches!(err, AppError::Validation(_)));
     }
 }

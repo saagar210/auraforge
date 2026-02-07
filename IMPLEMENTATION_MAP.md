@@ -2,7 +2,7 @@
 
 Updated: 2026-02-07
 Owner: Engineering
-Status: Active roadmap complete (`confidence scoring`, `planning coverage UI`, `audit report fixes`, `additional local runtimes`, `project templates`, `codebase import`, `conversation branching`, `linux builds`). Deferred-only items remain below.
+Status: Active roadmap complete (`confidence scoring`, `planning coverage UI`, `audit report fixes`, `additional local runtimes`, `project templates`, `codebase import`, `conversation branching`, `linux builds`, `release runbook/checklist hardening`). Deferred-only items remain below.
 
 ## 1) Fixed Product Constraints
 
@@ -534,7 +534,7 @@ A roadmap item is complete only when all conditions are true:
 
 ## 9) Immediate Next Action
 
-Start with **Planning Coverage UI** implementation using section 6.1 exactly as written, then progress sequentially by commit plan in section 7.
+Run release gate checks from `RELEASE_CHECKLIST.md` for each release candidate, then execute deferred items only when product scope changes.
 
 ## 10) Next Roadmap Block (Post-Merge)
 
@@ -552,6 +552,102 @@ Scope:
 Status:
 - Completed 2026-02-07.
 
+### Block H: Test Architecture Expansion (Phase 6)
+
+Objective:
+- Ensure new frontend store tests are enforced in CI rather than local-only.
+
+Scope:
+1. Extend Linux CI frontend checks to run `npm run test` in addition to typecheck/build.
+2. Keep Rust fmt/clippy/test/build gates unchanged.
+
+Status:
+- Completed 2026-02-07.
+
+### Block I: Importer Performance and Scalability (Phase 7)
+
+Objective:
+- Reduce memory and I/O overhead during repository import scans while preserving output behavior.
+
+Scope:
+1. Replace full-file reads with capped prefix reads (bounded by import byte budget).
+2. Track imported bytes using actual read size for better budget accounting.
+3. Add regression tests for prefix-read behavior on large and small files.
+
+Status:
+- Completed 2026-02-07.
+
+### Block F: Search Reliability and Fallback Hardening (Phase 4)
+
+Objective:
+- Keep web search non-blocking and resilient under provider failures while reducing duplicate query churn.
+
+Scope:
+1. Add TTL-based in-memory cache for repeated `(provider, query)` lookups.
+2. Keep Tavily fallback to DuckDuckGo and add SearXNG fallback to DuckDuckGo on failure.
+3. Normalize provider/query cache keys for stable reuse.
+4. Add regression test for cache-key normalization behavior.
+
+Status:
+- Completed 2026-02-07.
+
+### Block G: UI State Gating for Long-Running Operations (Phase 5)
+
+Objective:
+- Prevent overlapping operations that can produce stuck or contradictory UI states.
+
+Scope:
+1. Block `sendMessage` while document generation is active, with explicit toast feedback.
+2. Block `generateDocuments` while a stream response is active, with explicit toast feedback.
+3. Block retry flow while generation is active.
+4. Add store-level race tests for these gating rules.
+
+Status:
+- Completed 2026-02-07.
+
+### Block E: Local Provider Contract Hardening (Phase 3)
+
+Objective:
+- Normalize local provider behavior and reduce provider-branching drift across runtime paths.
+
+Scope:
+1. Introduce explicit provider kind resolution (`ollama`, `openai_compatible` aliases).
+2. Route model listing, connection checks, model checks, streaming, and generation through normalized provider kind handling.
+3. Keep pull-model enforcement explicit for Ollama-only behavior.
+4. Add regression tests for provider parsing and unsupported-provider validation.
+
+Status:
+- Completed 2026-02-07.
+
+### Block D: Filesystem and Persistence Robustness (Phase 2)
+
+Objective:
+- Prevent path traversal/partial-write edge cases and improve config durability guarantees.
+
+Scope:
+1. Add destination preflight checks for export folder existence/type/readonly state.
+2. Validate export filenames to reject nested/absolute/blank paths before writing files.
+3. Continue atomic export behavior with sanitized write inputs and deterministic manifest output.
+4. Harden config persistence using atomic write helper with parent-directory fsync and temp cleanup on rename failure.
+5. Add regression tests for export filename validation and atomic config replacement.
+
+Status:
+- Completed 2026-02-07.
+
+### Block C: Security and Runtime Hardening (Phase 1)
+
+Objective:
+- Reduce runtime attack surface and remove packaging warnings without changing user workflow.
+
+Scope:
+1. Tighten Tauri CSP by removing unneeded sources (`https:` image source wildcard, websocket connect sources not used by app flow).
+2. Restrict default capability permissions by removing broad plugin defaults and keeping explicit allow-list entries.
+3. Fix bundle identifier format to avoid `.app` suffix warning during macOS packaging.
+4. Re-run full build/test/release gate verification.
+
+Status:
+- Completed 2026-02-07.
+
 ### Block B: Async Race Integration Coverage (Frontend/Tauri)
 
 Objective:
@@ -565,3 +661,29 @@ Scope:
 
 Status:
 - Completed 2026-02-07.
+
+### Block J: Release Gate and Packaging Operations (Phase 8)
+
+Objective:
+- Make release readiness repeatable with explicit verification and smoke criteria for macOS/Linux.
+
+Scope:
+1. Add a release checklist with branch hygiene, frontend/rust verification gates, packaging gate, smoke checks, and policy checks.
+2. Include security/config spot-check commands in the same checklist.
+3. Require audit/map sync before release signoff.
+
+Status:
+- Completed 2026-02-07 (`RELEASE_CHECKLIST.md`).
+
+### Block K: Runtime Runbook and Documentation Closure (Phase 9)
+
+Objective:
+- Provide operational troubleshooting guidance and align top-level docs with the local-first/model-agnostic posture.
+
+Scope:
+1. Add runtime runbook covering dependency checks, smoke flows, and failure playbooks.
+2. Update README to link runbook/checklist and remove stale quality signaling.
+3. Sync implementation map and audit report with final roadmap closure.
+
+Status:
+- Completed 2026-02-07 (`RUNBOOK.md`, README/AUDIT updates).

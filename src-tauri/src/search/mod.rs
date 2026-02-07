@@ -5,8 +5,9 @@ mod trigger;
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 use crate::types::SearchConfig;
@@ -21,6 +22,63 @@ fn search_client() -> &'static Client {
             .build()
             .unwrap_or_else(|_| Client::new())
     })
+}
+
+const SEARCH_CACHE_TTL_SECS: u64 = 45;
+const SEARCH_CACHE_MAX_ENTRIES: usize = 64;
+
+#[derive(Debug, Clone)]
+struct SearchCacheEntry {
+    inserted_at: Instant,
+    results: Vec<SearchResult>,
+}
+
+fn search_cache() -> &'static Mutex<HashMap<String, SearchCacheEntry>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, SearchCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cache_key(provider: &str, query: &str) -> String {
+    format!(
+        "{}::{}",
+        provider.trim().to_ascii_lowercase(),
+        query.trim().to_ascii_lowercase()
+    )
+}
+
+fn get_cached_results(key: &str) -> Option<Vec<SearchResult>> {
+    let cache = search_cache();
+    let mut guard = cache.lock().ok()?;
+    let ttl = Duration::from_secs(SEARCH_CACHE_TTL_SECS);
+    guard.retain(|_, entry| entry.inserted_at.elapsed() < ttl);
+    guard.get(key).map(|entry| entry.results.clone())
+}
+
+fn put_cached_results(key: String, results: Vec<SearchResult>) {
+    let cache = search_cache();
+    let Ok(mut guard) = cache.lock() else {
+        return;
+    };
+    let ttl = Duration::from_secs(SEARCH_CACHE_TTL_SECS);
+    guard.retain(|_, entry| entry.inserted_at.elapsed() < ttl);
+
+    if guard.len() >= SEARCH_CACHE_MAX_ENTRIES {
+        if let Some(oldest_key) = guard
+            .iter()
+            .min_by_key(|(_, entry)| entry.inserted_at)
+            .map(|(key, _)| key.clone())
+        {
+            guard.remove(&oldest_key);
+        }
+    }
+
+    guard.insert(
+        key,
+        SearchCacheEntry {
+            inserted_at: Instant::now(),
+            results,
+        },
+    );
 }
 
 #[derive(Debug, Error)]
@@ -49,13 +107,21 @@ pub async fn execute_search(
     config: &SearchConfig,
     query: &str,
 ) -> Result<Vec<SearchResult>, SearchError> {
-    if !config.enabled || config.provider == "none" {
+    let query = query.trim();
+    if query.is_empty() || !config.enabled || config.provider == "none" {
         return Ok(vec![]);
     }
+
+    let provider = config.provider.trim().to_ascii_lowercase();
+    let key = cache_key(&provider, query);
+    if let Some(cached) = get_cached_results(&key) {
+        return Ok(cached);
+    }
+
     let client = search_client();
-    match config.provider.as_str() {
+    let results = match provider.as_str() {
         "tavily" => match tavily::search(client, &config.tavily_api_key, query).await {
-            Ok(results) => Ok(results),
+            Ok(results) => results,
             Err(
                 SearchError::InvalidApiKey
                 | SearchError::RateLimited
@@ -64,17 +130,43 @@ pub async fn execute_search(
                 | SearchError::NoResults,
             ) => {
                 log::warn!(
-                    "Tavily search failed, falling back to DuckDuckGo: {}",
+                    "Tavily search failed, falling back to DuckDuckGo for query '{}'",
                     query
                 );
-                duckduckgo::search(client, query).await
+                duckduckgo::search(client, query).await?
             }
         },
-        "duckduckgo" => duckduckgo::search(client, query).await,
-        "searxng" => searxng::search(client, &config.searxng_url, query).await,
+        "duckduckgo" => duckduckgo::search(client, query).await?,
+        "searxng" => match searxng::search(client, &config.searxng_url, query).await {
+            Ok(results) => results,
+            Err(err) => {
+                log::warn!(
+                    "SearXNG search failed ({:?}), falling back to DuckDuckGo for query '{}'",
+                    err,
+                    query
+                );
+                duckduckgo::search(client, query).await?
+            }
+        },
         other => {
             log::warn!("Unknown search provider '{}', returning no results", other);
-            Ok(vec![])
+            vec![]
         }
+    };
+
+    put_cached_results(key, results.clone());
+    Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_key_normalizes_provider_and_query() {
+        let a = cache_key(" Tavily ", "How To Build");
+        let b = cache_key("tavily", "how to build");
+        assert_eq!(a, b);
+        assert_eq!(a, "tavily::how to build");
     }
 }

@@ -14,7 +14,6 @@
   <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/Rust-2021_Edition-DEA584?logo=rust&logoColor=white" alt="Rust" /></a>
   <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/TypeScript-Strict-3178C6?logo=typescript&logoColor=white" alt="TypeScript Strict" /></a>
   <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/Tailwind_CSS-4.0-38BDF8?logo=tailwindcss&logoColor=white" alt="Tailwind CSS 4" /></a>
-  <a href="https://github.com/saagar210/auraforge"><img src="https://img.shields.io/badge/Tests-41_passing-brightgreen" alt="41 Tests Passing" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License" /></a>
 </p>
 
@@ -28,6 +27,7 @@
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
 - [Getting Started](#getting-started)
+- [Operations](#operations)
 - [Generated Output](#generated-output)
 - [Quality Metrics](#quality-metrics)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
@@ -40,7 +40,7 @@
 
 ## The Problem
 
-You have a project idea. You open Claude Code and start typing. Twenty minutes later, you're refactoring your third attempt at an auth system because you didn't think through the data model first.
+You have a project idea. You open your coding assistant and start typing. Twenty minutes later, you're refactoring your third attempt at an auth system because you didn't think through the data model first.
 
 **Planning is the bottleneck of AI-assisted development.** ChatGPT gives you walls of generic advice. Docs assume you already know what you're building. And no tool takes you from _"I want to build X"_ to _"here's your spec, config, and step-by-step prompts — start coding."_
 
@@ -60,13 +60,13 @@ AuraForge is a planning partner that thinks with you, not for you. You describe 
 | **2. Refine through dialogue** | AuraForge asks clarifying questions — scope, tech choices, trade-offs. Web search provides current context automatically when it detects technical topics. |
 | **3. Converge on decisions** | The conversation narrows from broad idea to concrete plan. Tech stack, architecture, phases — all decided collaboratively. |
 | **4. Forge the plan** | After 3+ exchanges, click **Forge the Plan** to generate planning docs plus a model handoff from your conversation. |
-| **5. Save and build** | Export to a folder. Open `START_HERE.md` — it walks you through setup, copying `CLAUDE.md`, and pasting your first prompt into Claude Code. |
+| **5. Save and build** | Export to a folder. Open `START_HERE.md` and `MODEL_HANDOFF.md` — they walk you through setup and first prompts for your coding assistant. |
 
 ### The Output Documents
 
 | Document | Purpose |
 |----------|---------|
-| **START_HERE.md** | Quick-start bridge — prerequisites, step-by-step setup, your first Claude Code prompt. Non-technical friendly. |
+| **START_HERE.md** | Quick-start bridge — prerequisites, step-by-step setup, and first prompt flow. Non-technical friendly. |
 | **SPEC.md** | Technical specification with interface contracts in real code (Rust structs, TS interfaces — not pseudocode). Undiscussed topics marked `[TBD]`. |
 | **CLAUDE.md** | Project context for Claude Code — tech stack, commands, conventions, and anti-patterns. Drop in your repo root. |
 | **PROMPTS.md** | Phased implementation with complexity indicators, per-phase prerequisites, verification checklists, and cross-references to SPEC.md + CLAUDE.md. |
@@ -207,6 +207,14 @@ On Linux, the same command produces `.deb` and `.AppImage` bundles in `src-tauri
 
 ---
 
+## Operations
+
+- Runtime operations and troubleshooting: [`RUNBOOK.md`](RUNBOOK.md)
+- Release gate checklist: [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md)
+- Correctness/security audit history: [`AUDIT_REPORT.md`](AUDIT_REPORT.md)
+
+---
+
 ## Generated Output
 
 When you click **Forge the Plan** (available after 3+ exchanges), AuraForge creates:
@@ -231,10 +239,11 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 
 | Metric | Result |
 |--------|--------|
-| `cargo test` | **45/45 passing** |
+| `npm run test` | **5/5 passing** |
+| `cargo test` | **62/62 passing** |
 | `cargo clippy -- -D warnings` | **0 warnings** |
 | `npx tsc --noEmit` | **0 errors** |
-| `npm run tauri build` | **Produces .app + .dmg** |
+| `npm run tauri build` | **Produces macOS + Linux bundles** |
 | Source lines | **~8,825** across Rust, TypeScript, and CSS |
 | Rust test coverage | Config parsing, DB operations, search trigger detection (18 cases), URL extraction, model matching, message deletion |
 
@@ -276,6 +285,7 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 - [x] Confidence scoring — post-generation assessment of document completeness
 - [x] Planning coverage UI — sidebar indicator tracking topic coverage during conversation
 - [x] Audit report fixes — structured error handling (`AppError`), transaction safety, CSP hardening (see AUDIT_REPORT.md)
+- [x] Release operations runbook + checklist for macOS/Linux
 
 ### Future
 
@@ -285,6 +295,7 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 - [x] Import existing codebases for refactoring plans
 - [ ] Export to GitHub Issues / Linear integration
 - [x] Conversation branching — explore alternate decisions without losing the main thread
+- [ ] Windows packaging support (explicitly deferred)
 
 ---
 
@@ -294,8 +305,9 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for developmen
 
 ```bash
 # Run all checks before submitting
-cd src-tauri && cargo fmt && cargo clippy -- -D warnings && cargo test && cd ..
+npm run test
 npx tsc --noEmit
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test && cd ..
 ```
 
 If you find a bug or have a feature idea, [open an issue](https://github.com/saagar210/auraforge/issues).

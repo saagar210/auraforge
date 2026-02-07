@@ -978,6 +978,26 @@ pub async fn save_to_folder(
     state: State<'_, AppState>,
     request: SaveToFolderRequest,
 ) -> Result<String, ErrorResponse> {
+    let requested_root = std::path::PathBuf::from(&request.folder_path);
+    let root_metadata = std::fs::metadata(&requested_root).map_err(|e| {
+        to_response(AppError::FileSystem {
+            path: request.folder_path.clone(),
+            message: format!("Cannot access destination folder: {}", e),
+        })
+    })?;
+    if !root_metadata.is_dir() {
+        return Err(to_response(AppError::FileSystem {
+            path: request.folder_path.clone(),
+            message: "Destination must be a folder.".to_string(),
+        }));
+    }
+    if root_metadata.permissions().readonly() {
+        return Err(to_response(AppError::FileSystem {
+            path: request.folder_path.clone(),
+            message: "Destination folder is read-only.".to_string(),
+        }));
+    }
+
     let documents = state
         .db
         .get_documents(&request.session_id)
@@ -989,6 +1009,7 @@ pub async fn save_to_folder(
             message: "No documents to save. Generate documents first.".to_string(),
         }));
     }
+    let export_documents = prepare_export_documents(&documents).map_err(to_response)?;
 
     let session = state
         .db
@@ -1013,12 +1034,11 @@ pub async fn save_to_folder(
 
     // Sanitize session name for folder name
     let sanitized_name = sanitize_folder_name(&session.name);
-    let output_dir =
-        std::path::PathBuf::from(&request.folder_path).join(format!("{}-plan", sanitized_name));
+    let output_dir = requested_root.join(format!("{}-plan", sanitized_name));
 
     let output_path = output_dir.to_string_lossy().to_string();
     let output_path_for_thread = output_path.clone();
-    let docs_for_thread = documents.clone();
+    let docs_for_thread = export_documents.clone();
     let output_dir_for_thread = output_dir.clone();
     let meta_for_thread = generation_meta.clone();
     let import_context_for_thread = import_context.clone();
@@ -1154,7 +1174,11 @@ pub async fn save_to_folder(
     })?;
 
     write_result.map_err(to_response)?;
-    log::info!("Saved {} documents to {}", documents.len(), output_path);
+    log::info!(
+        "Saved {} documents to {}",
+        export_documents.len(),
+        output_path
+    );
 
     Ok(output_path)
 }
@@ -1259,9 +1283,55 @@ struct ExportManifestFile {
     sha256: String,
 }
 
+#[derive(Debug, Clone)]
+struct ExportDocument {
+    filename: String,
+    content: String,
+}
+
 // ============ HELPERS ============
 
-fn build_export_manifest_files(docs: &[GeneratedDocument]) -> Vec<ExportManifestFile> {
+fn prepare_export_documents(docs: &[GeneratedDocument]) -> Result<Vec<ExportDocument>, AppError> {
+    docs.iter()
+        .map(|doc| {
+            validate_export_filename(&doc.filename)?;
+            Ok(ExportDocument {
+                filename: doc.filename.clone(),
+                content: doc.content.clone(),
+            })
+        })
+        .collect()
+}
+
+fn validate_export_filename(filename: &str) -> Result<(), AppError> {
+    let trimmed = filename.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Validation(
+            "Cannot export document with an empty filename.".to_string(),
+        ));
+    }
+    let path = std::path::Path::new(trimmed);
+    if path.is_absolute() || path.components().count() != 1 {
+        return Err(AppError::Validation(format!(
+            "Unsafe export filename '{}'. Nested or absolute paths are not allowed.",
+            filename
+        )));
+    }
+    let is_same_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value == trimmed);
+    if !is_same_name {
+        return Err(AppError::Validation(format!(
+            "Unsafe export filename '{}'.",
+            filename
+        )));
+    }
+
+    Ok(())
+}
+
+fn build_export_manifest_files(docs: &[ExportDocument]) -> Vec<ExportManifestFile> {
     let mut files: Vec<ExportManifestFile> = docs
         .iter()
         .map(|doc| ExportManifestFile {
@@ -1346,12 +1416,14 @@ mod tests {
 
     #[test]
     fn build_export_manifest_files_orders_known_documents_first() {
-        let files = build_export_manifest_files(&[
+        let export_docs = prepare_export_documents(&[
             doc("Z_NOTES.md", "notes"),
             doc("README.md", "read me"),
             doc("START_HERE.md", "start here"),
             doc("A_CUSTOM.md", "custom"),
-        ]);
+        ])
+        .expect("export docs should validate");
+        let files = build_export_manifest_files(&export_docs);
 
         let ordered_names: Vec<String> = files.into_iter().map(|f| f.filename).collect();
         assert_eq!(
@@ -1367,7 +1439,9 @@ mod tests {
 
     #[test]
     fn build_export_manifest_files_includes_hash_bytes_and_lines() {
-        let files = build_export_manifest_files(&[doc("SPEC.md", "abc"), doc("EMPTY.md", "")]);
+        let export_docs = prepare_export_documents(&[doc("SPEC.md", "abc"), doc("EMPTY.md", "")])
+            .expect("export docs should validate");
+        let files = build_export_manifest_files(&export_docs);
         let spec = files
             .iter()
             .find(|f| f.filename == "SPEC.md")
@@ -1389,5 +1463,20 @@ mod tests {
             empty.sha256,
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
+    }
+
+    #[test]
+    fn prepare_export_documents_rejects_nested_or_absolute_paths() {
+        let nested = prepare_export_documents(&[doc("../escape.md", "bad")]);
+        assert!(nested.is_err(), "parent traversal should be rejected");
+
+        let absolute = prepare_export_documents(&[doc("/tmp/evil.md", "bad")]);
+        assert!(absolute.is_err(), "absolute paths should be rejected");
+    }
+
+    #[test]
+    fn prepare_export_documents_rejects_empty_filename() {
+        let result = prepare_export_documents(&[doc("   ", "bad")]);
+        assert!(result.is_err(), "blank filenames should be rejected");
     }
 }

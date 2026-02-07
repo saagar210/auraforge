@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::error::ConfigError;
 use crate::types::AppConfig;
@@ -129,18 +129,43 @@ pub fn save_config(config: &AppConfig) -> Result<(), String> {
     validate_config(config).map_err(|e| e.to_string())?;
     let yaml =
         serde_yaml::to_string(config).map_err(|e| format!("Failed to serialize config: {}", e))?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
-    }
+    write_config_atomically(&path, yaml.as_bytes())
+}
+
+fn write_config_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Config path has no parent: {}", path.display()))?;
+    fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
+
     let tmp_path = path.with_extension("yaml.tmp");
     let mut file =
         fs::File::create(&tmp_path).map_err(|e| format!("Failed to write config: {}", e))?;
-    file.write_all(yaml.as_bytes())
+    file.write_all(bytes)
         .map_err(|e| format!("Failed to write config: {}", e))?;
     file.sync_all()
         .map_err(|e| format!("Failed to sync config: {}", e))?;
-    fs::rename(&tmp_path, &path).map_err(|e| format!("Failed to write config: {}", e))?;
+    drop(file);
+
+    if let Err(e) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!("Failed to write config: {}", e));
+    }
+
+    sync_directory(parent)?;
     Ok(())
+}
+
+fn sync_directory(path: &Path) -> Result<(), String> {
+    let dir = fs::File::open(path).map_err(|e| {
+        format!(
+            "Failed to open config dir for sync ({}): {}",
+            path.display(),
+            e
+        )
+    })?;
+    dir.sync_all()
+        .map_err(|e| format!("Failed to sync config dir ({}): {}", path.display(), e))
 }
 
 fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
@@ -244,4 +269,29 @@ fn normalize_local_model_config(config: &mut AppConfig) -> bool {
     }
 
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn write_config_atomically_creates_and_replaces_file() {
+        let dir = tempdir().expect("temp dir should be created");
+        let path = dir.path().join("config.yaml");
+
+        write_config_atomically(&path, b"first: value").expect("initial write should succeed");
+        let first = fs::read_to_string(&path).expect("file should be readable");
+        assert_eq!(first, "first: value");
+
+        write_config_atomically(&path, b"second: value").expect("replace write should succeed");
+        let second = fs::read_to_string(&path).expect("file should be readable");
+        assert_eq!(second, "second: value");
+
+        assert!(
+            !path.with_extension("yaml.tmp").exists(),
+            "temporary file should not remain after successful write"
+        );
+    }
 }
