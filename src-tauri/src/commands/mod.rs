@@ -736,44 +736,76 @@ pub async fn save_to_folder(
             return Err(AppError::FolderExists(output_path_for_thread));
         }
 
-        std::fs::create_dir(&output_dir_for_thread).map_err(|e| {
+        let staging_dir = output_dir_for_thread.with_extension(format!(
+            "plan_tmp_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+
+        std::fs::create_dir(&staging_dir).map_err(|e| {
             if e.kind() == std::io::ErrorKind::PermissionDenied {
                 AppError::FileSystem {
-                    path: output_dir_for_thread.to_string_lossy().to_string(),
+                    path: staging_dir.to_string_lossy().to_string(),
                     message: "Can't write to this location. Choose another folder.".to_string(),
                 }
             } else {
                 AppError::FileSystem {
-                    path: output_dir_for_thread.to_string_lossy().to_string(),
+                    path: staging_dir.to_string_lossy().to_string(),
                     message: format!("Failed to create folder: {}", e),
                 }
             }
         })?;
 
-        for doc in &docs_for_thread {
-            let file_path = output_dir_for_thread.join(&doc.filename);
-            std::fs::write(&file_path, &doc.content).map_err(|e| {
-                if e.raw_os_error() == Some(28) {
-                    AppError::FileSystem {
-                        path: file_path.to_string_lossy().to_string(),
-                        message: "Not enough disk space. Free up space and try again.".to_string(),
+        let write_docs_result = (|| -> Result<(), AppError> {
+            for doc in &docs_for_thread {
+                let staging_file_path = staging_dir.join(&doc.filename);
+                let final_file_path = output_dir_for_thread.join(&doc.filename);
+                std::fs::write(&staging_file_path, &doc.content).map_err(|e| {
+                    if e.raw_os_error() == Some(28) {
+                        AppError::FileSystem {
+                            path: final_file_path.to_string_lossy().to_string(),
+                            message: "Not enough disk space. Free up space and try again.".to_string(),
+                        }
+                    } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        AppError::FileSystem {
+                            path: final_file_path.to_string_lossy().to_string(),
+                            message: format!(
+                                "Permission denied writing {}. Choose another folder.",
+                                doc.filename
+                            ),
+                        }
+                    } else {
+                        AppError::FileSystem {
+                            path: final_file_path.to_string_lossy().to_string(),
+                            message: format!("Failed to write {}: {}", doc.filename, e),
+                        }
                     }
-                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    AppError::FileSystem {
-                        path: file_path.to_string_lossy().to_string(),
-                        message: format!(
-                            "Permission denied writing {}. Choose another folder.",
-                            doc.filename
-                        ),
-                    }
-                } else {
-                    AppError::FileSystem {
-                        path: file_path.to_string_lossy().to_string(),
-                        message: format!("Failed to write {}: {}", doc.filename, e),
-                    }
-                }
-            })?;
+                })?;
+            }
+            Ok(())
+        })();
+
+        if let Err(err) = write_docs_result {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            return Err(err);
         }
+
+        std::fs::rename(&staging_dir, &output_dir_for_thread).map_err(|e| {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            if e.kind() == std::io::ErrorKind::AlreadyExists || output_dir_for_thread.exists() {
+                AppError::FolderExists(output_path_for_thread.clone())
+            } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                AppError::FileSystem {
+                    path: output_dir_for_thread.to_string_lossy().to_string(),
+                    message: "Can't finalize export in this location. Choose another folder."
+                        .to_string(),
+                }
+            } else {
+                AppError::FileSystem {
+                    path: output_dir_for_thread.to_string_lossy().to_string(),
+                    message: format!("Failed to finalize export: {}", e),
+                }
+            }
+        })?;
 
         Ok(())
     })
