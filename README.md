@@ -48,7 +48,7 @@ The gap between idea and execution-ready plan is where most projects stall.
 
 ## What AuraForge Does
 
-AuraForge is a planning partner that thinks with you, not for you. You describe what you want to build. It asks hard questions, challenges weak assumptions, and grounds decisions in current best practices via live web search. When the plan is solid, it generates six production-ready documents that you drop into your project and start building immediately.
+AuraForge is a planning partner that thinks with you, not for you. You describe what you want to build. It asks hard questions, challenges weak assumptions, and grounds decisions in current best practices via live web search. When the plan is solid, it generates a complete execution document pack you can drop into your project and start building immediately.
 
 **The key insight:** the output isn't advice — it's artifacts. A spec your AI coding tool can follow. Prompts broken into phases. A conversation log so you remember _why_ you made each decision.
 
@@ -59,10 +59,10 @@ AuraForge is a planning partner that thinks with you, not for you. You describe 
 | **1. Describe your idea** | Start a new session and explain what you want to build in plain language. |
 | **2. Refine through dialogue** | AuraForge asks clarifying questions — scope, tech choices, trade-offs. Web search provides current context automatically when it detects technical topics. |
 | **3. Converge on decisions** | The conversation narrows from broad idea to concrete plan. Tech stack, architecture, phases — all decided collaboratively. |
-| **4. Forge the plan** | After 3+ exchanges, click **Forge the Plan** to generate all six documents from your conversation. |
+| **4. Forge the plan** | After 3+ exchanges, click **Forge the Plan** to generate planning docs plus a model handoff from your conversation. |
 | **5. Save and build** | Export to a folder. Open `START_HERE.md` — it walks you through setup, copying `CLAUDE.md`, and pasting your first prompt into Claude Code. |
 
-### The Six Documents
+### The Output Documents
 
 | Document | Purpose |
 |----------|---------|
@@ -71,6 +71,7 @@ AuraForge is a planning partner that thinks with you, not for you. You describe 
 | **CLAUDE.md** | Project context for Claude Code — tech stack, commands, conventions, and anti-patterns. Drop in your repo root. |
 | **PROMPTS.md** | Phased implementation with complexity indicators, per-phase prerequisites, verification checklists, and cross-references to SPEC.md + CLAUDE.md. |
 | **README.md** | Planning folder orientation — key decisions, known gaps, document guide. |
+| **MODEL_HANDOFF.md** | Target-aware handoff notes for Codex, Claude, Cursor, Gemini, or generic coding agents. |
 | **CONVERSATION.md** | Full planning transcript from session data (no LLM needed). Revisit to understand _why_ decisions were made. |
 
 Documents are generated sequentially with cross-referencing — each document receives all previously generated documents as context, ensuring consistency across the entire output.
@@ -85,11 +86,11 @@ Natural dialogue powered by Ollama's local LLM inference. Responses stream token
 ### Grounded in Reality via Web Search
 Three search providers with automatic failover: **DuckDuckGo** (free, HTML scraping with multi-selector fallback), **Tavily** (API-based, higher quality), and **SearXNG** (self-hosted). Search triggers automatically when the conversation involves technical topics — detected by matching against 46 technology keywords and 25 trigger patterns. Results are injected as system context so the LLM can reference current versions, best practices, and real-world trade-offs.
 
-### Six-Document Generation with Cross-Referencing
+### Multi-Document Generation with Cross-Referencing
 Sequential generation in dependency order: SPEC → CLAUDE → PROMPTS → README → START_HERE. Each document receives all previously generated documents as context, enabling cross-referencing (e.g., PROMPTS.md references exact conventions from CLAUDE.md, START_HERE.md generates setup steps matching the actual tech stack). Documents use `[TBD — not discussed during planning]` markers for undiscussed topics instead of inventing content. Output validation retries once if a document doesn't start with a proper heading (`#`). Documents are stored atomically — old versions are deleted and new ones inserted in a single database transaction. Staleness detection compares the latest message timestamp against document generation time.
 
 ### Planning Readiness Tracking
-When you trigger document generation, AuraForge assesses conversation coverage across key planning topics: problem statement, user flow, tech stack, data model, and scope boundaries. If gaps exist, it reports them and offers to fill them or proceed with `[TBD]` markers — advisory only, never blocks generation. This prevents shipping incomplete plans without the user realizing what's missing.
+When you trigger document generation, AuraForge assesses conversation coverage across key planning topics: problem statement, user flow, tech stack, data model, and scope boundaries. If gaps exist, it reports them and asks for explicit confirmation before forcing generation with `[TBD]` markers. This prevents accidental exports of incomplete plans.
 
 ### Local-First and Private
 All data stays on your machine. Conversations live in a local SQLite database with WAL mode. Config is stored as YAML in `~/.auraforge/`. The only network calls are to your local Ollama instance and (optionally) web search providers. No telemetry, no cloud sync, no API keys required to get started.
@@ -215,6 +216,7 @@ my-project-plan/
 ├── SPEC.md             # Technical specification
 ├── CLAUDE.md           # Project context for Claude Code
 ├── PROMPTS.md          # Phased implementation prompts
+├── MODEL_HANDOFF.md    # Target-specific model handoff
 └── CONVERSATION.md     # Full planning transcript
 ```
 
@@ -226,7 +228,7 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 
 | Metric | Result |
 |--------|--------|
-| `cargo test` | **41/41 passing** |
+| `cargo test` | **45/45 passing** |
 | `cargo clippy -- -D warnings` | **0 warnings** |
 | `npx tsc --noEmit` | **0 errors** |
 | `npm run tauri build` | **Produces .app + .dmg** |

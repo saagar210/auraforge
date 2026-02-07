@@ -1,14 +1,46 @@
 import { Hammer } from "lucide-react";
+import type { ForgeTarget } from "../types";
 
 interface ForgeButtonProps {
   onClick: () => void;
   disabled: boolean;
   generating: boolean;
+  target: ForgeTarget;
+  onTargetChange: (target: ForgeTarget) => void;
 }
 
-export function ForgeButton({ onClick, disabled, generating }: ForgeButtonProps) {
+const TARGET_OPTIONS: Array<{ value: ForgeTarget; label: string }> = [
+  { value: "generic", label: "Any model" },
+  { value: "codex", label: "Codex" },
+  { value: "claude", label: "Claude" },
+  { value: "cursor", label: "Cursor" },
+  { value: "gemini", label: "Gemini" },
+];
+
+export function ForgeButton({
+  onClick,
+  disabled,
+  generating,
+  target,
+  onTargetChange,
+}: ForgeButtonProps) {
   return (
-    <div className="flex justify-center py-4">
+    <div className="flex flex-col items-center gap-3 py-4">
+      <label className="flex items-center gap-2 text-xs text-text-secondary">
+        <span>Output target</span>
+        <select
+          value={target}
+          onChange={(event) => onTargetChange(event.target.value as ForgeTarget)}
+          disabled={generating}
+          className="px-2.5 py-1.5 bg-surface border border-border-default rounded-md text-xs text-text-primary focus:outline-none focus:border-accent-glow disabled:opacity-60"
+        >
+          {TARGET_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
       <button
         onClick={onClick}
         disabled={disabled || generating}

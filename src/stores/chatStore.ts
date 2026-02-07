@@ -16,6 +16,9 @@ import type {
   GenerateComplete,
   ModelPullProgress,
   OnboardingStep,
+  ForgeTarget,
+  QualityReport,
+  GenerationMetadata,
 } from "../types";
 import { normalizeError } from "../utils/errorMessages";
 import { resolveDefaultPath } from "../utils/paths";
@@ -43,6 +46,9 @@ interface ChatState {
   generateProgress: GenerateProgress | null;
   documentsStale: boolean;
   showPreview: boolean;
+  forgeTarget: ForgeTarget;
+  planReadiness: QualityReport | null;
+  generationMetadata: GenerationMetadata | null;
 
   // Health
   healthStatus: HealthStatus | null;
@@ -101,7 +107,12 @@ interface ChatState {
   updateConfig: (config: AppConfig) => Promise<AppConfig | null>;
 
   // Document actions
-  generateDocuments: () => Promise<void>;
+  setForgeTarget: (target: ForgeTarget) => void;
+  analyzePlanReadiness: () => Promise<QualityReport | null>;
+  generateDocuments: (options?: {
+    target?: ForgeTarget;
+    force?: boolean;
+  }) => Promise<boolean>;
   loadDocuments: () => Promise<void>;
   checkStale: (sessionIdOverride?: string) => Promise<void>;
   setShowPreview: (show: boolean) => void;
@@ -175,6 +186,9 @@ export const useChatStore = create<ChatState>((set, get) => {
   generateProgress: null,
   documentsStale: false,
   showPreview: false,
+  forgeTarget: "generic",
+  planReadiness: null,
+  generationMetadata: null,
   toast: null,
   healthStatus: null,
   onboardingDismissed: false,
@@ -286,6 +300,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         documents: [],
         showPreview: false,
         documentsStale: false,
+        planReadiness: null,
+        generationMetadata: null,
       }));
       return session;
     } catch (e) {
@@ -308,6 +324,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       documents: [],
       showPreview: false,
       documentsStale: false,
+      planReadiness: null,
+      generationMetadata: null,
     });
     try {
       const messages = await invoke<Message[]>("get_messages", {
@@ -340,6 +358,10 @@ export const useChatStore = create<ChatState>((set, get) => {
           documents:
             state.currentSessionId === sessionId ? [] : state.documents,
           showPreview: state.currentSessionId === sessionId ? false : state.showPreview,
+          planReadiness:
+            state.currentSessionId === sessionId ? null : state.planReadiness,
+          generationMetadata:
+            state.currentSessionId === sessionId ? null : state.generationMetadata,
         };
       });
       const newId = get().currentSessionId;
@@ -370,6 +392,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           messages: activeDeleted ? [] : state.messages,
           documents: activeDeleted ? [] : state.documents,
           showPreview: activeDeleted ? false : state.showPreview,
+          planReadiness: activeDeleted ? null : state.planReadiness,
+          generationMetadata: activeDeleted ? null : state.generationMetadata,
         };
       });
       const newId = get().currentSessionId;
@@ -568,7 +592,10 @@ export const useChatStore = create<ChatState>((set, get) => {
   loadConfig: async () => {
     try {
       const config = await invoke<AppConfig>("get_config");
-      set({ config });
+      set({
+        config,
+        forgeTarget: config.output.default_target,
+      });
       return config;
     } catch (e) {
       console.error("Failed to load config:", e);
@@ -592,7 +619,10 @@ export const useChatStore = create<ChatState>((set, get) => {
   updateConfig: async (config) => {
     try {
       const updated = await invoke<AppConfig>("update_config", { config });
-      set({ config: updated });
+      set({
+        config: updated,
+        forgeTarget: updated.output.default_target,
+      });
       return updated;
     } catch (e) {
       console.error("Failed to update config:", e);
@@ -602,16 +632,61 @@ export const useChatStore = create<ChatState>((set, get) => {
 
   // ============ DOCUMENT GENERATION ============
 
-  generateDocuments: async () => {
+  setForgeTarget: (target: ForgeTarget) => {
+    set({ forgeTarget: target });
+  },
+
+  analyzePlanReadiness: async () => {
     const sessionId = get().currentSessionId;
-    if (!sessionId || get().isGenerating) return;
+    if (!sessionId) return null;
+
+    try {
+      const report = await invoke<QualityReport>("analyze_plan_readiness", {
+        session_id: sessionId,
+      });
+      set({ planReadiness: report });
+      return report;
+    } catch (e) {
+      console.error("Failed to analyze readiness:", e);
+      return null;
+    }
+  },
+
+  generateDocuments: async (options) => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId || get().isGenerating) return false;
+    const target = options?.target ?? get().forgeTarget;
+    const force = options?.force ?? false;
 
     set({ isGenerating: true, generateProgress: null, _generatingSessionId: sessionId });
 
     try {
       const documents = await invoke<GeneratedDocument[]>("generate_documents", {
-        request: { session_id: sessionId },
+        request: {
+          session_id: sessionId,
+          target,
+          force,
+        },
       });
+      let generationMetadata: GenerationMetadata | null = null;
+      try {
+        generationMetadata = await invoke<GenerationMetadata | null>(
+          "get_generation_metadata",
+          { session_id: sessionId },
+        );
+      } catch (metaError) {
+        console.warn("Failed to load generation metadata:", metaError);
+      }
+
+      let planReadiness: QualityReport | null = get().planReadiness;
+      if (generationMetadata?.quality_json) {
+        try {
+          planReadiness = JSON.parse(generationMetadata.quality_json) as QualityReport;
+        } catch {
+          // keep previously known readiness
+        }
+      }
+
       // If user is still on the same session, show the documents
       if (get().currentSessionId === sessionId) {
         set({
@@ -621,6 +696,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           documentsStale: false,
           showPreview: true,
           _generatingSessionId: null,
+          generationMetadata,
+          planReadiness,
         });
       } else {
         // User switched away — docs are in DB, loadDocuments() will pick them up on navigate-back
@@ -630,6 +707,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           _generatingSessionId: null,
         });
       }
+      return true;
     } catch (e) {
       console.error("Failed to generate documents:", e);
       set({
@@ -640,6 +718,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           ? `Document generation failed: ${normalizeError(e)}`
           : null,
       });
+      return false;
     }
   },
 
@@ -651,12 +730,31 @@ export const useChatStore = create<ChatState>((set, get) => {
       const documents = await invoke<GeneratedDocument[]>("get_documents", {
         session_id: sessionId,
       });
+      let generationMetadata: GenerationMetadata | null = null;
+      try {
+        generationMetadata = await invoke<GenerationMetadata | null>(
+          "get_generation_metadata",
+          { session_id: sessionId },
+        );
+      } catch (metaError) {
+        console.warn("Failed to load generation metadata:", metaError);
+      }
+      let planReadiness: QualityReport | null = null;
+      if (generationMetadata?.quality_json) {
+        try {
+          planReadiness = JSON.parse(generationMetadata.quality_json) as QualityReport;
+        } catch {
+          // Ignore malformed metadata and continue with documents
+        }
+      }
       if (get().currentSessionId !== sessionId) {
         return;
       }
       set({
         documents,
         documentsStale: false,
+        generationMetadata,
+        planReadiness,
       });
       // Check staleness for this same session in the background.
       void get().checkStale(sessionId);

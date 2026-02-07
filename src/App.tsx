@@ -49,6 +49,8 @@ function App() {
     generateProgress,
     documentsStale,
     showPreview,
+    forgeTarget,
+    planReadiness,
     healthStatus,
     wizardCompleted,
     preferencesLoaded,
@@ -67,7 +69,9 @@ function App() {
     cancelResponse,
     clearStreamError,
     retryLastMessage,
+    analyzePlanReadiness,
     generateDocuments,
+    setForgeTarget,
     setShowPreview,
     saveToFolder,
     openFolder,
@@ -197,6 +201,39 @@ function App() {
     }
   }, [config, saveToFolder]);
 
+  const handleForgePlan = useCallback(async (options?: { ignoreThreshold?: boolean }) => {
+    if (
+      !currentSessionId ||
+      isCurrentSessionGenerating ||
+      isStreaming ||
+      (!options?.ignoreThreshold && !canForge)
+    ) {
+      return;
+    }
+    const readiness = await analyzePlanReadiness();
+    if (readiness && readiness.missing_must_haves.length > 0) {
+      const proceed = window.confirm(
+        `Readiness check found missing must-haves:\n\n- ${readiness.missing_must_haves.join(
+          "\n- ",
+        )}\n\nForge anyway with [TBD] sections?`,
+      );
+      if (!proceed) {
+        return;
+      }
+      await generateDocuments({ target: forgeTarget, force: true });
+      return;
+    }
+    await generateDocuments({ target: forgeTarget, force: false });
+  }, [
+    analyzePlanReadiness,
+    canForge,
+    currentSessionId,
+    forgeTarget,
+    generateDocuments,
+    isCurrentSessionGenerating,
+    isStreaming,
+  ]);
+
   const loadOlderMessages = useCallback(() => {
     if (!hasOlderMessages) return;
     const el = chatContainerRef.current;
@@ -265,7 +302,9 @@ function App() {
       // Cmd+G — Generate documents (forge)
       if (isMod && e.key === "g") {
         e.preventDefault();
-        if (canForge) generateDocuments();
+        if (canForge) {
+          void handleForgePlan();
+        }
         return;
       }
 
@@ -290,6 +329,7 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     canForge,
+    handleForgePlan,
     hasDocuments,
     showSettings,
     showPreview,
@@ -386,7 +426,7 @@ function App() {
               <DocumentPreview
                 documents={documents}
                 stale={documentsStale}
-                onRegenerate={generateDocuments}
+                onRegenerate={() => handleForgePlan({ ignoreThreshold: true })}
                 regenerating={isCurrentSessionGenerating}
                 onSave={handleSaveToFolder}
               />
@@ -452,12 +492,19 @@ function App() {
                         {canForge && (
                           <div className="flex items-center gap-2">
                             <ForgeButton
-                              onClick={generateDocuments}
+                              onClick={handleForgePlan}
                               disabled={!canForge}
                               generating={isCurrentSessionGenerating}
+                              target={forgeTarget}
+                              onTargetChange={setForgeTarget}
                             />
-                            <InfoTooltip text="Generates 5 planning documents from your conversation" />
+                            <InfoTooltip text="Generates planning docs + model handoff from your conversation" />
                           </div>
+                        )}
+                        {canForge && planReadiness && (
+                          <p className="text-xs text-text-muted text-center">
+                            Readiness: {planReadiness.score}/100
+                          </p>
                         )}
                       </>
                     )}

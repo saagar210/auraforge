@@ -8,7 +8,15 @@ import { Copy, Check, RefreshCw, FolderDown } from "lucide-react";
 import { clsx } from "clsx";
 import type { GeneratedDocument } from "../types";
 
-const TAB_ORDER = ["START_HERE.md", "README.md", "SPEC.md", "CLAUDE.md", "PROMPTS.md", "CONVERSATION.md"];
+const TAB_ORDER = [
+  "START_HERE.md",
+  "README.md",
+  "SPEC.md",
+  "CLAUDE.md",
+  "PROMPTS.md",
+  "MODEL_HANDOFF.md",
+  "CONVERSATION.md",
+];
 
 const markdownComponents = {
   a({ href, children }: { href?: string; children?: React.ReactNode }) {
@@ -179,10 +187,18 @@ export function DocumentPreview({
     };
   }, []);
 
-  // Sort documents by TAB_ORDER
-  const sortedDocs = TAB_ORDER
-    .map((name) => documents.find((d) => d.filename === name))
-    .filter((d): d is GeneratedDocument => d !== undefined);
+  // Sort documents by TAB_ORDER and include unknown filenames afterwards.
+  const ranked = new Map<string, number>(
+    TAB_ORDER.map((name, index) => [name, index]),
+  );
+  const sortedDocs = [...documents].sort((a, b) => {
+    const rankA = ranked.get(a.filename);
+    const rankB = ranked.get(b.filename);
+    if (rankA !== undefined && rankB !== undefined) return rankA - rankB;
+    if (rankA !== undefined) return -1;
+    if (rankB !== undefined) return 1;
+    return a.filename.localeCompare(b.filename);
+  });
 
   // If active tab doesn't match any doc, auto-select first available
   const effectiveTab = sortedDocs.some((d) => d.filename === activeTab)

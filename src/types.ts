@@ -75,6 +75,8 @@ export interface GenerateComplete {
 
 export interface GenerateDocumentsRequest {
   session_id: string;
+  target?: ForgeTarget;
+  force?: boolean;
 }
 
 export interface SaveToFolderRequest {
@@ -94,6 +96,7 @@ export interface LLMConfig {
   provider: 'ollama' | 'anthropic' | 'openai';
   model: string;
   base_url: string;
+  api_key?: string | null;
   temperature: number;
   max_tokens: number;
 }
@@ -113,6 +116,25 @@ export interface UIConfig {
 export interface OutputConfig {
   include_conversation: boolean;
   default_save_path: string;
+  default_target: ForgeTarget;
+}
+
+export type ForgeTarget = 'claude' | 'codex' | 'cursor' | 'gemini' | 'generic';
+
+export interface QualityReport {
+  score: number;
+  missing_must_haves: string[];
+  missing_should_haves: string[];
+  summary: string;
+}
+
+export interface GenerationMetadata {
+  session_id: string;
+  target: ForgeTarget | string;
+  provider: string;
+  model: string;
+  quality_json: string | null;
+  created_at: string;
 }
 
 // Health check

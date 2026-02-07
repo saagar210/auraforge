@@ -62,6 +62,14 @@ export function HelpPanel({ open, onClose }: HelpPanelProps) {
                 <tbody className="divide-y divide-border-subtle">
                   <tr>
                     <td className="py-1.5 pr-3 font-mono text-accent-glow whitespace-nowrap">
+                      START_HERE.md
+                    </td>
+                    <td className="py-1.5 text-text-muted">
+                      Quick start guide and first execution steps
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 pr-3 font-mono text-accent-glow whitespace-nowrap">
                       README.md
                     </td>
                     <td className="py-1.5 text-text-muted">
@@ -90,6 +98,14 @@ export function HelpPanel({ open, onClose }: HelpPanelProps) {
                     </td>
                     <td className="py-1.5 text-text-muted">
                       Prompts to kick off each phase
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 pr-3 font-mono text-accent-glow whitespace-nowrap">
+                      MODEL_HANDOFF.md
+                    </td>
+                    <td className="py-1.5 text-text-muted">
+                      Target-specific execution guidance for coding models
                     </td>
                   </tr>
                   <tr>

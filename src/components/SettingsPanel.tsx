@@ -2,7 +2,14 @@ import { useEffect, useState } from "react";
 import { X, RotateCcw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useChatStore } from "../stores/chatStore";
-import type { AppConfig, LLMConfig, SearchConfig, OutputConfig, UIConfig } from "../types";
+import type {
+  AppConfig,
+  LLMConfig,
+  SearchConfig,
+  OutputConfig,
+  UIConfig,
+  ForgeTarget,
+} from "../types";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -30,6 +37,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [llmProvider, setLlmProvider] = useState("ollama");
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [llmApiKey, setLlmApiKey] = useState("");
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(65536);
 
@@ -43,6 +51,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   // Output state
   const [includeConversation, setIncludeConversation] = useState(true);
   const [defaultSavePath, setDefaultSavePath] = useState("~/Projects");
+  const [defaultTarget, setDefaultTarget] = useState<ForgeTarget>("generic");
   const [uiTheme, setUiTheme] = useState<UIConfig["theme"]>("dark");
 
   useEffect(() => {
@@ -52,6 +61,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         setLlmProvider(config.llm.provider);
         setModel(config.llm.model);
         setBaseUrl(config.llm.base_url);
+        setLlmApiKey(config.llm.api_key ?? "");
         setTemperature(config.llm.temperature);
         setMaxTokens(config.llm.max_tokens);
         setSearchEnabled(config.search.enabled);
@@ -61,6 +71,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         setProactive(config.search.proactive);
         setIncludeConversation(config.output.include_conversation);
         setDefaultSavePath(config.output.default_save_path);
+        setDefaultTarget(config.output.default_target);
         setUiTheme(config.ui.theme);
       });
       // Load installed models for dropdown
@@ -77,6 +88,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       provider: llmProvider as LLMConfig["provider"],
       model,
       base_url: baseUrl,
+      api_key: llmApiKey,
       temperature,
       max_tokens: maxTokens,
     };
@@ -92,6 +104,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     const output: OutputConfig = {
       include_conversation: includeConversation,
       default_save_path: defaultSavePath,
+      default_target: defaultTarget,
     };
 
     const ui: UIConfig = {
@@ -230,6 +243,23 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 />
               </div>
 
+              <div>
+                <label className="block text-sm text-text-secondary mb-1.5">
+                  Default Output Target
+                </label>
+                <select
+                  value={defaultTarget}
+                  onChange={(e) => setDefaultTarget(e.target.value as ForgeTarget)}
+                  className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                >
+                  <option value="generic">Any model</option>
+                  <option value="codex">Codex</option>
+                  <option value="claude">Claude</option>
+                  <option value="cursor">Cursor</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </div>
+
               {/* Re-run Setup */}
               <button
                 onClick={handleRerunSetup}
@@ -320,6 +350,21 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                       className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
                     />
                   </div>
+
+                  {llmProvider !== "ollama" && (
+                    <div>
+                      <label className="block text-sm text-text-secondary mb-1.5">
+                        API Key
+                      </label>
+                      <input
+                        type="password"
+                        value={llmApiKey}
+                        onChange={(e) => setLlmApiKey(e.target.value)}
+                        placeholder="Provider API key"
+                        className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label className="flex items-center justify-between text-sm text-text-secondary mb-1.5">
@@ -469,6 +514,23 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                       placeholder="~/Projects"
                       className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1.5">
+                      Default Output Target
+                    </label>
+                    <select
+                      value={defaultTarget}
+                      onChange={(e) => setDefaultTarget(e.target.value as ForgeTarget)}
+                      className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                    >
+                      <option value="generic">Any model</option>
+                      <option value="codex">Codex</option>
+                      <option value="claude">Claude</option>
+                      <option value="cursor">Cursor</option>
+                      <option value="gemini">Gemini</option>
+                    </select>
                   </div>
                 </div>
               )}
