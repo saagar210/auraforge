@@ -6,6 +6,7 @@ use tauri::{Emitter, State};
 use crate::config::save_config;
 use crate::docgen;
 use crate::error::{AppError, ErrorResponse};
+use crate::importer;
 use crate::llm::ChatMessage;
 use crate::search::{self, SearchResult};
 use crate::state::AppState;
@@ -476,6 +477,45 @@ pub async fn get_messages(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn import_codebase_context(
+    state: State<'_, AppState>,
+    request: ImportCodebaseRequest,
+) -> Result<CodebaseImportSummary, ErrorResponse> {
+    let root_path = request.root_path.clone();
+    let summary =
+        tauri::async_runtime::spawn_blocking(move || importer::summarize_codebase(&root_path))
+            .await
+            .map_err(|e| {
+                to_response(AppError::FileSystem {
+                    path: request.root_path.clone(),
+                    message: format!("Failed to import codebase: {}", e),
+                })
+            })?
+            .map_err(to_response)?;
+
+    let metadata = serde_json::json!({
+        "import_summary": &summary,
+    })
+    .to_string();
+    let content = format!(
+        "{}\n\nImported automatically from `{}`.",
+        summary.summary_markdown, summary.root_path
+    );
+
+    state
+        .db
+        .save_message(
+            &request.session_id,
+            "assistant",
+            &content,
+            Some(metadata.as_str()),
+        )
+        .map_err(to_response)?;
+
+    Ok(summary)
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn send_message(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -853,6 +893,18 @@ pub async fn save_to_folder(
         .db
         .get_generation_metadata(&request.session_id)
         .map_err(to_response)?;
+    let import_context = state
+        .db
+        .get_messages(&request.session_id)
+        .map_err(to_response)?
+        .into_iter()
+        .rev()
+        .find_map(|message| {
+            message
+                .metadata
+                .as_deref()
+                .and_then(extract_import_summary_from_metadata)
+        });
 
     // Sanitize session name for folder name
     let sanitized_name = sanitize_folder_name(&session.name);
@@ -864,6 +916,7 @@ pub async fn save_to_folder(
     let docs_for_thread = documents.clone();
     let output_dir_for_thread = output_dir.clone();
     let meta_for_thread = generation_meta.clone();
+    let import_context_for_thread = import_context.clone();
     let session_name_for_thread = session.name.clone();
     let session_id_for_thread = request.session_id.clone();
 
@@ -948,6 +1001,7 @@ pub async fn save_to_folder(
                 .as_ref()
                 .and_then(|m| m.confidence_json.as_ref())
                 .and_then(|q| serde_json::from_str::<ConfidenceReport>(q).ok()),
+            import_context: import_context_for_thread.clone(),
             files: docs_for_thread
                 .iter()
                 .map(|doc| doc.filename.clone())
@@ -1089,10 +1143,16 @@ struct ExportManifest {
     created_at: String,
     quality: Option<QualityReport>,
     confidence: Option<ConfidenceReport>,
+    import_context: Option<CodebaseImportSummary>,
     files: Vec<String>,
 }
 
 // ============ HELPERS ============
+
+fn extract_import_summary_from_metadata(metadata: &str) -> Option<CodebaseImportSummary> {
+    let value = serde_json::from_str::<serde_json::Value>(metadata).ok()?;
+    serde_json::from_value::<CodebaseImportSummary>(value.get("import_summary")?.clone()).ok()
+}
 
 fn build_search_context(query: &str, results: &[SearchResult]) -> String {
     let mut context = format!(

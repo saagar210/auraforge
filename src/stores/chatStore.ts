@@ -12,6 +12,7 @@ import type {
   SearchConfig,
   HealthStatus,
   PlanningTemplate,
+  CodebaseImportSummary,
   GeneratedDocument,
   GenerateProgress,
   GenerateComplete,
@@ -55,6 +56,7 @@ interface ChatState {
   planningCoverage: CoverageReport | null;
   generationConfidence: ConfidenceReport | null;
   generationMetadata: GenerationMetadata | null;
+  latestImportSummary: CodebaseImportSummary | null;
 
   // Health
   healthStatus: HealthStatus | null;
@@ -126,6 +128,7 @@ interface ChatState {
   loadDocuments: () => Promise<void>;
   checkStale: (sessionIdOverride?: string) => Promise<void>;
   setShowPreview: (show: boolean) => void;
+  importCodebaseContext: (rootPath: string) => Promise<CodebaseImportSummary | null>;
 
   // Export actions
   saveToFolder: (folderPath: string) => Promise<string | null>;
@@ -202,6 +205,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   planningCoverage: null,
   generationConfidence: null,
   generationMetadata: null,
+  latestImportSummary: null,
   toast: null,
   healthStatus: null,
   onboardingDismissed: false,
@@ -318,6 +322,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         planningCoverage: null,
         generationConfidence: null,
         generationMetadata: null,
+        latestImportSummary: null,
       }));
       return session;
     } catch (e) {
@@ -349,6 +354,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         planningCoverage: null,
         generationConfidence: null,
         generationMetadata: null,
+        latestImportSummary: null,
       }));
 
       const messages = await invoke<Message[]>("get_messages", {
@@ -394,6 +400,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       planningCoverage: null,
       generationConfidence: null,
       generationMetadata: null,
+      latestImportSummary: null,
     });
     try {
       const messages = await invoke<Message[]>("get_messages", {
@@ -435,6 +442,8 @@ export const useChatStore = create<ChatState>((set, get) => {
             state.currentSessionId === sessionId ? null : state.generationConfidence,
           generationMetadata:
             state.currentSessionId === sessionId ? null : state.generationMetadata,
+          latestImportSummary:
+            state.currentSessionId === sessionId ? null : state.latestImportSummary,
         };
       });
       const newId = get().currentSessionId;
@@ -469,6 +478,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           planningCoverage: activeDeleted ? null : state.planningCoverage,
           generationConfidence: activeDeleted ? null : state.generationConfidence,
           generationMetadata: activeDeleted ? null : state.generationMetadata,
+          latestImportSummary: activeDeleted ? null : state.latestImportSummary,
         };
       });
       const newId = get().currentSessionId;
@@ -931,6 +941,40 @@ export const useChatStore = create<ChatState>((set, get) => {
   },
 
   setShowPreview: (show: boolean) => set({ showPreview: show }),
+
+  importCodebaseContext: async (rootPath: string) => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return null;
+
+    try {
+      const summary = await invoke<CodebaseImportSummary>("import_codebase_context", {
+        request: { session_id: sessionId, root_path: rootPath },
+      });
+      const messages = await invoke<Message[]>("get_messages", {
+        session_id: sessionId,
+      });
+      if (get().currentSessionId === sessionId) {
+        set({
+          messages,
+          latestImportSummary: summary,
+          toast: {
+            message: `Imported ${summary.files_included} files of codebase context`,
+            type: "success",
+          },
+        });
+      }
+      void get().getPlanningCoverage();
+      return summary;
+    } catch (e) {
+      set({
+        toast: {
+          message: normalizeError(e),
+          type: "error",
+        },
+      });
+      return null;
+    }
+  },
 
   // ============ EXPORT ============
 

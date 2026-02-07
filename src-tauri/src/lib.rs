@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod docgen;
 mod error;
+mod importer;
 mod llm;
 mod search;
 mod state;
@@ -184,6 +185,7 @@ pub fn run() {
             commands::get_messages,
             commands::send_message,
             commands::cancel_response,
+            commands::import_codebase_context,
             commands::get_config,
             commands::update_search_config,
             commands::update_config,

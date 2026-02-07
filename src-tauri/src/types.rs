@@ -104,6 +104,12 @@ pub struct SaveToFolderRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportCodebaseRequest {
+    pub session_id: String,
+    pub root_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSessionFromTemplateRequest {
     pub template_id: String,
     pub name: Option<String>,
@@ -233,6 +239,17 @@ pub struct PlanningTemplate {
     pub target_stack: String,
     pub version: u8,
     pub seed_prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseImportSummary {
+    pub root_path: String,
+    pub files_scanned: usize,
+    pub files_included: usize,
+    pub total_bytes_read: u64,
+    pub detected_stacks: Vec<String>,
+    pub key_files: Vec<String>,
+    pub summary_markdown: String,
 }
 
 impl Default for AppConfig {

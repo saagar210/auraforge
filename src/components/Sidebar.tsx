@@ -12,6 +12,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useChatStore } from "../stores/chatStore";
 import type { CoverageStatus } from "../types";
 
@@ -30,6 +31,7 @@ export function Sidebar() {
     planningCoverage,
     getPlanningCoverage,
     sendMessage,
+    importCodebaseContext,
     isStreaming,
     isGenerating,
   } = useChatStore();
@@ -189,6 +191,17 @@ export function Sidebar() {
     await sendMessage(
       `Let's close this planning gap: ${topic}. Ask me 1-2 concrete questions so we can finalize it.`,
     );
+  };
+
+  const handleImportCodebase = async () => {
+    if (!currentSessionId) return;
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: "Select a local codebase to import",
+    });
+    if (typeof selected !== "string" || !selected) return;
+    await importCodebaseContext(selected);
   };
 
   return (
@@ -430,6 +443,14 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="px-4 py-3 border-t border-border-subtle flex items-center gap-3">
+        <button
+          onClick={() => void handleImportCodebase()}
+          aria-label="Import local codebase"
+          disabled={!currentSessionId}
+          className="flex items-center gap-2 text-text-secondary text-xs hover:text-text-primary transition-colors duration-200 cursor-pointer bg-transparent border-none disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <span>Import Repo</span>
+        </button>
         <button
           onClick={() => setShowSettings(true)}
           aria-label="Open settings"

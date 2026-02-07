@@ -26,6 +26,16 @@ export interface CreateSessionFromTemplateRequest {
   name?: string;
 }
 
+export interface CodebaseImportSummary {
+  root_path: string;
+  files_scanned: number;
+  files_included: number;
+  total_bytes_read: number;
+  detected_stacks: string[];
+  key_files: string[];
+  summary_markdown: string;
+}
+
 // Message types
 export interface Message {
   id: string;
@@ -96,6 +106,11 @@ export interface GenerateDocumentsRequest {
 export interface SaveToFolderRequest {
   session_id: string;
   folder_path: string;
+}
+
+export interface ImportCodebaseRequest {
+  session_id: string;
+  root_path: string;
 }
 
 // Config types
