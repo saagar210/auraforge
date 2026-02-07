@@ -140,4 +140,24 @@ Implemented smallest safe fixes first (highest severity first), each in an isola
 
 ### Remaining Audit Risks
 1. Windows-specific config replacement semantics are still deferred (Windows is currently out of active scope).
-2. Frontend/Tauri integration tests for async event race paths are still limited.
+2. Frontend/Tauri integration coverage is now present for key `chatStore` race paths, but full UI-level E2E race validation is still limited.
+
+## Update: Post-Merge Hardening (2026-02-07)
+- Merged model-agnostic export interoperability hardening:
+  - `manifest.json` now uses schema v2 and includes deterministic per-file metadata (`bytes`, `lines`, `sha256`).
+  - Manifest file ordering is deterministic across exports.
+  - Added Rust regression tests for checksum and ordering behavior.
+- Merged frontend async-race integration coverage:
+  - Added Vitest harness and store-level tests for:
+    - stale `loadDocuments` results after session switches,
+    - cancel safety timeout not resetting newer session streams,
+    - `stream:done` clearing timeout to prevent false resets.
+- Release gate rerun on current `main`:
+  - `npx tsc --noEmit` passed.
+  - `npm run test` passed.
+  - `npm run build` passed.
+  - `cargo fmt --check` passed.
+  - `cargo clippy --all-targets --all-features -- -D warnings` passed.
+  - `cargo test` passed (54 tests).
+  - `cargo build` passed.
+  - `npm run tauri build` passed (macOS `.app` and `.dmg` bundles produced).
