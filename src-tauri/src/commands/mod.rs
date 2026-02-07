@@ -144,23 +144,35 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthStatus, Er
     let config_valid = config_error.is_none();
 
     let mut errors = Vec::new();
+    let provider_label = if config.llm.provider == "ollama" {
+        "Ollama"
+    } else {
+        "local OpenAI-compatible runtime"
+    };
 
     if !ollama_connected {
         errors.push(format!(
-            "Cannot connect to Ollama at {}. Is it running?",
-            config.llm.base_url
+            "Cannot connect to {} at {}.",
+            provider_label, config.llm.base_url
         ));
     } else if !ollama_model_available {
-        errors.push(format!(
-            "Model '{}' not found. Run: ollama pull {}",
-            config.llm.model,
-            config
-                .llm
-                .model
-                .split(':')
-                .next()
-                .unwrap_or(&config.llm.model)
-        ));
+        if config.llm.provider == "ollama" {
+            errors.push(format!(
+                "Model '{}' not found. Run: ollama pull {}",
+                config.llm.model,
+                config
+                    .llm
+                    .model
+                    .split(':')
+                    .next()
+                    .unwrap_or(&config.llm.model)
+            ));
+        } else {
+            errors.push(format!(
+                "Model '{}' is not available from the configured runtime. Load the model in your runtime and retry.",
+                config.llm.model
+            ));
+        }
     }
 
     if !database_ok || db_error.is_some() {
@@ -255,7 +267,7 @@ pub async fn list_models(state: State<'_, AppState>) -> Result<Vec<String>, Erro
         .clone();
     state
         .ollama
-        .list_models(&config.llm.base_url)
+        .list_models(&config.llm)
         .await
         .map_err(to_response)
 }
@@ -273,7 +285,7 @@ pub async fn pull_model(
         .clone();
     state
         .ollama
-        .pull_model(&app, &config.llm.base_url, &model_name)
+        .pull_model(&app, &config.llm, &model_name)
         .await
         .map_err(to_response)
 }
@@ -560,8 +572,7 @@ pub async fn send_message(
         .ollama
         .stream_chat(
             &app,
-            &config.llm.base_url,
-            &config.llm.model,
+            &config.llm,
             chat_messages,
             config.llm.temperature,
             Some(config.llm.max_tokens),

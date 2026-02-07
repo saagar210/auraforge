@@ -35,7 +35,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
 
   // LLM state
   const [model, setModel] = useState("");
+  const [provider, setProvider] = useState<LLMConfig["provider"]>("ollama");
   const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(65536);
 
@@ -57,7 +59,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       loadConfig().then((config: AppConfig | null) => {
         if (!config) return;
         setModel(config.llm.model);
+        setProvider(config.llm.provider);
         setBaseUrl(config.llm.base_url);
+        setApiKey(config.llm.api_key ?? "");
         setTemperature(config.llm.temperature);
         setMaxTokens(config.llm.max_tokens);
         setSearchEnabled(config.search.enabled);
@@ -100,10 +104,10 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     }
 
     const llm: LLMConfig = {
-      provider: "ollama",
+      provider,
       model,
       base_url: baseUrl,
-      api_key: null,
+      api_key: apiKey.trim().length > 0 ? apiKey.trim() : null,
       temperature,
       max_tokens: maxTokens,
     };
@@ -180,12 +184,26 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           {!isAdvanced ? (
             /* =================== SIMPLE MODE =================== */
             <div className="space-y-5">
+              <div>
+                <label className="block text-sm text-text-secondary mb-1.5">
+                  Local Runtime
+                </label>
+                <select
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value as LLMConfig["provider"])}
+                  className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                >
+                  <option value="ollama">Ollama</option>
+                  <option value="openai_compatible">OpenAI-compatible (local)</option>
+                </select>
+              </div>
+
               {/* AI Model Dropdown */}
               <div>
                 <label className="block text-sm text-text-secondary mb-1.5">
                   AI Model
                 </label>
-                {installedModels.length > 0 ? (
+                {provider === "ollama" && installedModels.length > 0 ? (
                   <select
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
@@ -207,6 +225,38 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   />
                 )}
               </div>
+
+              <div>
+                <label className="block text-sm text-text-secondary mb-1.5">
+                  Runtime Base URL
+                </label>
+                <input
+                  type="text"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder={
+                    provider === "ollama"
+                      ? "http://localhost:11434"
+                      : "http://localhost:1234"
+                  }
+                  className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                />
+              </div>
+
+              {provider === "openai_compatible" && (
+                <div>
+                  <label className="block text-sm text-text-secondary mb-1.5">
+                    API Key (optional)
+                  </label>
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="Leave empty for keyless local endpoints"
+                    className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                  />
+                </div>
+              )}
 
               {/* Web Search Toggle */}
               <div>
@@ -329,8 +379,22 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   </h3>
 
                   <p className="text-xs text-text-muted">
-                    Local-only mode is enabled. AuraForge uses Ollama running on your machine.
+                    Local-only mode is enabled. Use Ollama or any local OpenAI-compatible endpoint.
                   </p>
+
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1.5">
+                      Provider
+                    </label>
+                    <select
+                      value={provider}
+                      onChange={(e) => setProvider(e.target.value as LLMConfig["provider"])}
+                      className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                    >
+                      <option value="ollama">Ollama</option>
+                      <option value="openai_compatible">OpenAI-compatible (local)</option>
+                    </select>
+                  </div>
 
                   <div>
                     <label className="block text-sm text-text-secondary mb-1.5">
@@ -353,10 +417,29 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                       type="text"
                       value={baseUrl}
                       onChange={(e) => setBaseUrl(e.target.value)}
-                      placeholder="http://localhost:11434"
+                      placeholder={
+                        provider === "ollama"
+                          ? "http://localhost:11434"
+                          : "http://localhost:1234"
+                      }
                       className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
                     />
                   </div>
+
+                  {provider === "openai_compatible" && (
+                    <div>
+                      <label className="block text-sm text-text-secondary mb-1.5">
+                        API Key (optional)
+                      </label>
+                      <input
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder="Leave empty for keyless local endpoints"
+                        className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label className="flex items-center justify-between text-sm text-text-secondary mb-1.5">

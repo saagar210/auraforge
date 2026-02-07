@@ -97,12 +97,7 @@ pub async fn generate_all_documents(
 
         let mut content = state
             .ollama
-            .generate(
-                &config.llm.base_url,
-                &config.llm.model,
-                llm_messages,
-                0.4, // Lower temperature for structured output
-            )
+            .generate(&config.llm, llm_messages, 0.4) // Lower temperature for structured output
             .await?;
 
         // Validate output starts with # heading — retry once if not
@@ -123,7 +118,7 @@ pub async fn generate_all_documents(
 
             content = state
                 .ollama
-                .generate(&config.llm.base_url, &config.llm.model, retry_messages, 0.3)
+                .generate(&config.llm, retry_messages, 0.3)
                 .await?;
         }
 

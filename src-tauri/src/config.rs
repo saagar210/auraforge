@@ -9,10 +9,10 @@ const DEFAULT_CONFIG_YAML: &str = r#"# AuraForge Configuration
 
 # LLM Provider Settings
 llm:
-  provider: ollama                          # local-only
+  provider: ollama                          # ollama | openai_compatible
   model: qwen3-coder:30b-a3b-instruct-q4_K_M
-  base_url: http://localhost:11434          # Ollama default
-  api_key: ""                               # unused in local-only mode
+  base_url: http://localhost:11434          # Ollama default (LM Studio commonly uses :1234)
+  api_key: ""                               # optional for openai_compatible runtimes
   temperature: 0.7
   max_tokens: 65536
 
@@ -145,9 +145,9 @@ pub fn save_config(config: &AppConfig) -> Result<(), String> {
 
 fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
     let llm_provider = config.llm.provider.as_str();
-    if llm_provider != "ollama" {
+    if !["ollama", "openai_compatible"].contains(&llm_provider) {
         return Err(ConfigError::InvalidValue(format!(
-            "llm.provider={} (local-only mode requires 'ollama')",
+            "llm.provider={} (expected 'ollama' or 'openai_compatible')",
             config.llm.provider
         )));
     }
@@ -222,11 +222,23 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
 fn normalize_local_model_config(config: &mut AppConfig) -> bool {
     let mut changed = false;
 
-    if config.llm.provider != "ollama" {
-        config.llm.provider = "ollama".to_string();
+    let provider = config.llm.provider.trim().to_ascii_lowercase();
+    let normalized_provider = match provider.as_str() {
+        "ollama" => "ollama",
+        "openai_compatible" | "openai-compatible" | "lmstudio" => "openai_compatible",
+        _ => "ollama",
+    };
+    if config.llm.provider != normalized_provider {
+        config.llm.provider = normalized_provider.to_string();
         changed = true;
     }
-    if config.llm.api_key.is_some() {
+
+    if config
+        .llm
+        .api_key
+        .as_deref()
+        .is_some_and(|key| key.trim().is_empty())
+    {
         config.llm.api_key = None;
         changed = true;
     }

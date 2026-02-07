@@ -93,7 +93,7 @@ export interface AppConfig {
 }
 
 export interface LLMConfig {
-  provider: 'ollama';
+  provider: 'ollama' | 'openai_compatible';
   model: string;
   base_url: string;
   api_key?: string | null;

@@ -278,7 +278,7 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 ### Future
 
 - [ ] Linux builds (Windows deferred)
-- [ ] Additional local model runtimes (LM Studio/Ollama-compatible endpoints)
+- [x] Additional local model runtimes (LM Studio/OpenAI-compatible local endpoints)
 - [ ] Project templates for common app types
 - [ ] Import existing codebases for refactoring plans
 - [ ] Export to GitHub Issues / Linear integration
