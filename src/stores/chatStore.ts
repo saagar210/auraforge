@@ -18,6 +18,7 @@ import type {
   OnboardingStep,
   ForgeTarget,
   QualityReport,
+  ConfidenceReport,
   GenerationMetadata,
 } from "../types";
 import { normalizeError } from "../utils/errorMessages";
@@ -48,6 +49,7 @@ interface ChatState {
   showPreview: boolean;
   forgeTarget: ForgeTarget;
   planReadiness: QualityReport | null;
+  generationConfidence: ConfidenceReport | null;
   generationMetadata: GenerationMetadata | null;
 
   // Health
@@ -109,6 +111,7 @@ interface ChatState {
   // Document actions
   setForgeTarget: (target: ForgeTarget) => void;
   analyzePlanReadiness: () => Promise<QualityReport | null>;
+  getGenerationConfidence: () => Promise<ConfidenceReport | null>;
   generateDocuments: (options?: {
     target?: ForgeTarget;
     force?: boolean;
@@ -188,6 +191,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   showPreview: false,
   forgeTarget: "generic",
   planReadiness: null,
+  generationConfidence: null,
   generationMetadata: null,
   toast: null,
   healthStatus: null,
@@ -301,6 +305,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         showPreview: false,
         documentsStale: false,
         planReadiness: null,
+        generationConfidence: null,
         generationMetadata: null,
       }));
       return session;
@@ -325,6 +330,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       showPreview: false,
       documentsStale: false,
       planReadiness: null,
+      generationConfidence: null,
       generationMetadata: null,
     });
     try {
@@ -360,6 +366,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           showPreview: state.currentSessionId === sessionId ? false : state.showPreview,
           planReadiness:
             state.currentSessionId === sessionId ? null : state.planReadiness,
+          generationConfidence:
+            state.currentSessionId === sessionId ? null : state.generationConfidence,
           generationMetadata:
             state.currentSessionId === sessionId ? null : state.generationMetadata,
         };
@@ -393,6 +401,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           documents: activeDeleted ? [] : state.documents,
           showPreview: activeDeleted ? false : state.showPreview,
           planReadiness: activeDeleted ? null : state.planReadiness,
+          generationConfidence: activeDeleted ? null : state.generationConfidence,
           generationMetadata: activeDeleted ? null : state.generationMetadata,
         };
       });
@@ -652,6 +661,22 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
   },
 
+  getGenerationConfidence: async () => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return null;
+    try {
+      const report = await invoke<ConfidenceReport | null>(
+        "get_generation_confidence",
+        { session_id: sessionId },
+      );
+      set({ generationConfidence: report });
+      return report;
+    } catch (e) {
+      console.error("Failed to load generation confidence:", e);
+      return null;
+    }
+  },
+
   generateDocuments: async (options) => {
     const sessionId = get().currentSessionId;
     if (!sessionId || get().isGenerating) return false;
@@ -686,6 +711,25 @@ export const useChatStore = create<ChatState>((set, get) => {
           // keep previously known readiness
         }
       }
+      let generationConfidence: ConfidenceReport | null = get().generationConfidence;
+      if (generationMetadata?.confidence_json) {
+        try {
+          generationConfidence = JSON.parse(
+            generationMetadata.confidence_json,
+          ) as ConfidenceReport;
+        } catch {
+          // keep previously known confidence
+        }
+      } else {
+        try {
+          generationConfidence = await invoke<ConfidenceReport | null>(
+            "get_generation_confidence",
+            { session_id: sessionId },
+          );
+        } catch {
+          // ignore confidence lookup failures
+        }
+      }
 
       // If user is still on the same session, show the documents
       if (get().currentSessionId === sessionId) {
@@ -698,6 +742,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           _generatingSessionId: null,
           generationMetadata,
           planReadiness,
+          generationConfidence,
         });
       } else {
         // User switched away — docs are in DB, loadDocuments() will pick them up on navigate-back
@@ -747,6 +792,25 @@ export const useChatStore = create<ChatState>((set, get) => {
           // Ignore malformed metadata and continue with documents
         }
       }
+      let generationConfidence: ConfidenceReport | null = null;
+      if (generationMetadata?.confidence_json) {
+        try {
+          generationConfidence = JSON.parse(
+            generationMetadata.confidence_json,
+          ) as ConfidenceReport;
+        } catch {
+          // Ignore malformed metadata and continue with documents
+        }
+      } else {
+        try {
+          generationConfidence = await invoke<ConfidenceReport | null>(
+            "get_generation_confidence",
+            { session_id: sessionId },
+          );
+        } catch {
+          // ignore confidence lookup failures
+        }
+      }
       if (get().currentSessionId !== sessionId) {
         return;
       }
@@ -755,6 +819,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         documentsStale: false,
         generationMetadata,
         planReadiness,
+        generationConfidence,
       });
       // Check staleness for this same session in the background.
       void get().checkStale(sessionId);

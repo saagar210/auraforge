@@ -128,12 +128,27 @@ export interface QualityReport {
   summary: string;
 }
 
+export interface ConfidenceFactor {
+  name: string;
+  max_points: number;
+  points: number;
+  detail: string;
+}
+
+export interface ConfidenceReport {
+  score: number;
+  factors: ConfidenceFactor[];
+  blocking_gaps: string[];
+  summary: string;
+}
+
 export interface GenerationMetadata {
   session_id: string;
   target: ForgeTarget | string;
   provider: string;
   model: string;
   quality_json: string | null;
+  confidence_json: string | null;
   created_at: string;
 }
 

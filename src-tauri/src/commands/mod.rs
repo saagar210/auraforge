@@ -661,7 +661,9 @@ pub async fn generate_documents(
         .await
         .map_err(to_response)?;
 
+    let confidence = docgen::analyze_generation_confidence(&docs, Some(&quality));
     let quality_json = serde_json::to_string(&quality).ok();
+    let confidence_json = serde_json::to_string(&confidence).ok();
     state
         .db
         .upsert_generation_metadata(
@@ -670,6 +672,7 @@ pub async fn generate_documents(
             &config.llm.provider,
             &config.llm.model,
             quality_json.as_deref(),
+            confidence_json.as_deref(),
         )
         .map_err(to_response)?;
 
@@ -731,6 +734,40 @@ pub async fn get_generation_metadata(
         .db
         .get_generation_metadata(&session_id)
         .map_err(to_response)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_generation_confidence(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Option<ConfidenceReport>, ErrorResponse> {
+    let docs = state.db.get_documents(&session_id).map_err(to_response)?;
+    if docs.is_empty() {
+        return Ok(None);
+    }
+
+    let metadata = state
+        .db
+        .get_generation_metadata(&session_id)
+        .map_err(to_response)?;
+
+    if let Some(meta) = metadata.as_ref() {
+        if let Some(conf_json) = meta.confidence_json.as_ref() {
+            if let Ok(conf) = serde_json::from_str::<ConfidenceReport>(conf_json) {
+                return Ok(Some(conf));
+            }
+        }
+    }
+
+    let quality = metadata
+        .as_ref()
+        .and_then(|m| m.quality_json.as_ref())
+        .and_then(|q| serde_json::from_str::<QualityReport>(q).ok());
+
+    Ok(Some(docgen::analyze_generation_confidence(
+        &docs,
+        quality.as_ref(),
+    )))
 }
 
 // ============ EXPORT ============
@@ -851,6 +888,10 @@ pub async fn save_to_folder(
                 .as_ref()
                 .and_then(|m| m.quality_json.as_ref())
                 .and_then(|q| serde_json::from_str::<QualityReport>(q).ok()),
+            confidence: meta_for_thread
+                .as_ref()
+                .and_then(|m| m.confidence_json.as_ref())
+                .and_then(|q| serde_json::from_str::<ConfidenceReport>(q).ok()),
             files: docs_for_thread
                 .iter()
                 .map(|doc| doc.filename.clone())
@@ -983,6 +1024,7 @@ struct ExportManifest {
     model: String,
     created_at: String,
     quality: Option<QualityReport>,
+    confidence: Option<ConfidenceReport>,
     files: Vec<String>,
 }
 

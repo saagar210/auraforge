@@ -169,12 +169,29 @@ pub struct QualityReport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfidenceFactor {
+    pub name: String,
+    pub max_points: u8,
+    pub points: u8,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfidenceReport {
+    pub score: u8,
+    pub factors: Vec<ConfidenceFactor>,
+    pub blocking_gaps: Vec<String>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationMetadata {
     pub session_id: String,
     pub target: String,
     pub provider: String,
     pub model: String,
     pub quality_json: Option<String>,
+    pub confidence_json: Option<String>,
     pub created_at: String,
 }
 

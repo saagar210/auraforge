@@ -189,6 +189,7 @@ pub fn run() {
             commands::check_documents_stale,
             commands::analyze_plan_readiness,
             commands::get_generation_metadata,
+            commands::get_generation_confidence,
             commands::save_to_folder,
             commands::web_search,
         ])

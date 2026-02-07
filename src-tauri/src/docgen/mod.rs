@@ -1,3 +1,4 @@
+mod confidence;
 mod prompts;
 mod quality;
 
@@ -11,6 +12,7 @@ use crate::types::{
     Session,
 };
 
+pub use confidence::analyze_generation_confidence;
 use prompts::*;
 pub use quality::analyze_plan_readiness;
 

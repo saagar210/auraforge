@@ -74,6 +74,7 @@ impl Database {
                 provider TEXT NOT NULL,
                 model TEXT NOT NULL,
                 quality_json TEXT,
+                confidence_json TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
@@ -87,6 +88,7 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_generation_metadata_created ON generation_metadata(created_at DESC);
             ",
         )?;
+        Self::ensure_column_exists(&conn, "generation_metadata", "confidence_json", "TEXT")?;
         Ok(())
     }
 
@@ -407,18 +409,27 @@ impl Database {
         provider: &str,
         model: &str,
         quality_json: Option<&str>,
+        confidence_json: Option<&str>,
     ) -> Result<(), rusqlite::Error> {
         let conn = self.conn();
         conn.execute(
-            "INSERT INTO generation_metadata (session_id, target, provider, model, quality_json, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+            "INSERT INTO generation_metadata (session_id, target, provider, model, quality_json, confidence_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP)
              ON CONFLICT(session_id) DO UPDATE SET
                 target=excluded.target,
                 provider=excluded.provider,
                 model=excluded.model,
                 quality_json=excluded.quality_json,
+                confidence_json=excluded.confidence_json,
                 created_at=CURRENT_TIMESTAMP",
-            params![session_id, target, provider, model, quality_json],
+            params![
+                session_id,
+                target,
+                provider,
+                model,
+                quality_json,
+                confidence_json
+            ],
         )?;
         Ok(())
     }
@@ -429,7 +440,7 @@ impl Database {
     ) -> Result<Option<GenerationMetadata>, rusqlite::Error> {
         let conn = self.conn();
         match conn.query_row(
-            "SELECT session_id, target, provider, model, quality_json, created_at
+            "SELECT session_id, target, provider, model, quality_json, confidence_json, created_at
              FROM generation_metadata WHERE session_id = ?1",
             params![session_id],
             |row| {
@@ -439,7 +450,8 @@ impl Database {
                     provider: row.get(2)?,
                     model: row.get(3)?,
                     quality_json: row.get(4)?,
-                    created_at: row.get(5)?,
+                    confidence_json: row.get(5)?,
+                    created_at: row.get(6)?,
                 })
             },
         ) {
@@ -475,6 +487,26 @@ impl Database {
 
     fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn ensure_column_exists(
+        conn: &Connection,
+        table: &str,
+        column: &str,
+        decl: &str,
+    ) -> Result<(), rusqlite::Error> {
+        let pragma = format!("PRAGMA table_info({})", table);
+        let mut stmt = conn.prepare(&pragma)?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(1)?;
+            if name == column {
+                return Ok(());
+            }
+        }
+        let alter = format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, decl);
+        conn.execute(&alter, [])?;
+        Ok(())
     }
 }
 
@@ -780,6 +812,7 @@ mod tests {
             "ollama",
             "qwen3-coder",
             Some(r#"{"score":75}"#),
+            Some(r#"{"score":82}"#),
         )
         .unwrap();
 
@@ -787,14 +820,16 @@ mod tests {
         assert_eq!(meta.target, "generic");
         assert_eq!(meta.provider, "ollama");
         assert_eq!(meta.model, "qwen3-coder");
+        assert_eq!(meta.confidence_json.as_deref(), Some(r#"{"score":82}"#));
 
-        db.upsert_generation_metadata(&session.id, "codex", "openai", "gpt-5", None)
+        db.upsert_generation_metadata(&session.id, "codex", "openai", "gpt-5", None, None)
             .unwrap();
         let updated = db.get_generation_metadata(&session.id).unwrap().unwrap();
         assert_eq!(updated.target, "codex");
         assert_eq!(updated.provider, "openai");
         assert_eq!(updated.model, "gpt-5");
         assert!(updated.quality_json.is_none());
+        assert!(updated.confidence_json.is_none());
     }
 
     #[test]
