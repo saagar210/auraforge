@@ -242,8 +242,8 @@ export const useChatStore = create<ChatState>((set, get) => {
   dismissOnboarding: () => set({ onboardingDismissed: true }),
 
   retryLastMessage: async () => {
-    const { messages, currentSessionId, isStreaming } = get();
-    if (!currentSessionId || isStreaming) return;
+    const { messages, currentSessionId, isStreaming, isGenerating } = get();
+    if (!currentSessionId || isStreaming || isGenerating) return;
     clearCancelSafetyTimeout(currentSessionId);
 
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
@@ -544,7 +544,18 @@ export const useChatStore = create<ChatState>((set, get) => {
 
   sendMessage: async (content: string) => {
     const sessionId = get().currentSessionId;
-    if (!sessionId || get().isStreaming) return;
+    if (!sessionId) return;
+    if (get().isStreaming || get().isGenerating) {
+      if (get().isGenerating) {
+        set({
+          toast: {
+            message: "Wait for generation to complete before sending a new message.",
+            type: "error",
+          },
+        });
+      }
+      return;
+    }
     clearCancelSafetyTimeout(sessionId);
 
     set({
@@ -810,6 +821,15 @@ export const useChatStore = create<ChatState>((set, get) => {
   generateDocuments: async (options) => {
     const sessionId = get().currentSessionId;
     if (!sessionId || get().isGenerating) return false;
+    if (get().isStreaming) {
+      set({
+        toast: {
+          message: "Wait for the current response to finish before forging documents.",
+          type: "error",
+        },
+      });
+      return false;
+    }
     const target = options?.target ?? get().forgeTarget;
     const force = options?.force ?? false;
 

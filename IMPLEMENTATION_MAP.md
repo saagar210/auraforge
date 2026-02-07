@@ -552,6 +552,34 @@ Scope:
 Status:
 - Completed 2026-02-07.
 
+### Block F: Search Reliability and Fallback Hardening (Phase 4)
+
+Objective:
+- Keep web search non-blocking and resilient under provider failures while reducing duplicate query churn.
+
+Scope:
+1. Add TTL-based in-memory cache for repeated `(provider, query)` lookups.
+2. Keep Tavily fallback to DuckDuckGo and add SearXNG fallback to DuckDuckGo on failure.
+3. Normalize provider/query cache keys for stable reuse.
+4. Add regression test for cache-key normalization behavior.
+
+Status:
+- Completed 2026-02-07.
+
+### Block G: UI State Gating for Long-Running Operations (Phase 5)
+
+Objective:
+- Prevent overlapping operations that can produce stuck or contradictory UI states.
+
+Scope:
+1. Block `sendMessage` while document generation is active, with explicit toast feedback.
+2. Block `generateDocuments` while a stream response is active, with explicit toast feedback.
+3. Block retry flow while generation is active.
+4. Add store-level race tests for these gating rules.
+
+Status:
+- Completed 2026-02-07.
+
 ### Block E: Local Provider Contract Hardening (Phase 3)
 
 Objective:

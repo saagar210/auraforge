@@ -190,4 +190,37 @@ describe("chatStore async race safety", () => {
     expect(state.isStreaming).toBe(true);
     expect(state.streamingContent).toBe("fresh-stream");
   });
+
+  it("blocks sendMessage while generation is in progress", async () => {
+    useChatStore.setState({
+      currentSessionId: "session-a",
+      isGenerating: true,
+      isStreaming: false,
+      toast: null,
+    });
+
+    await useChatStore.getState().sendMessage("hello");
+
+    const state = useChatStore.getState();
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(state.toast?.type).toBe("error");
+    expect(state.toast?.message).toContain("generation");
+  });
+
+  it("blocks generateDocuments while streaming is active", async () => {
+    useChatStore.setState({
+      currentSessionId: "session-a",
+      isGenerating: false,
+      isStreaming: true,
+      toast: null,
+    });
+
+    const generated = await useChatStore.getState().generateDocuments();
+    const state = useChatStore.getState();
+
+    expect(generated).toBe(false);
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(state.toast?.type).toBe("error");
+    expect(state.toast?.message).toContain("response");
+  });
 });
