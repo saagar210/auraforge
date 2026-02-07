@@ -552,6 +552,31 @@ Scope:
 Status:
 - Completed 2026-02-07.
 
+### Block H: Test Architecture Expansion (Phase 6)
+
+Objective:
+- Ensure new frontend store tests are enforced in CI rather than local-only.
+
+Scope:
+1. Extend Linux CI frontend checks to run `npm run test` in addition to typecheck/build.
+2. Keep Rust fmt/clippy/test/build gates unchanged.
+
+Status:
+- Completed 2026-02-07.
+
+### Block I: Importer Performance and Scalability (Phase 7)
+
+Objective:
+- Reduce memory and I/O overhead during repository import scans while preserving output behavior.
+
+Scope:
+1. Replace full-file reads with capped prefix reads (bounded by import byte budget).
+2. Track imported bytes using actual read size for better budget accounting.
+3. Add regression tests for prefix-read behavior on large and small files.
+
+Status:
+- Completed 2026-02-07.
+
 ### Block F: Search Reliability and Fallback Hardening (Phase 4)
 
 Objective:

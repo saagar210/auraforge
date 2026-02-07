@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
@@ -124,7 +125,7 @@ pub fn summarize_codebase(root_path: &str) -> Result<CodebaseImportSummary, AppE
                 break;
             }
 
-            let bytes = match fs::read(&path) {
+            let bytes = match read_file_prefix(&path, capped_size as usize) {
                 Ok(bytes) => bytes,
                 Err(_) => continue,
             };
@@ -132,7 +133,7 @@ pub fn summarize_codebase(root_path: &str) -> Result<CodebaseImportSummary, AppE
                 continue;
             }
 
-            total_bytes_read += capped_size;
+            total_bytes_read += bytes.len() as u64;
             files_included += 1;
 
             if snippets.len() < MAX_SNIPPETS
@@ -294,4 +295,39 @@ fn build_summary_markdown(
     );
 
     summary
+}
+
+fn read_file_prefix(path: &Path, max_bytes: usize) -> std::io::Result<Vec<u8>> {
+    let file = fs::File::open(path)?;
+    let mut buffer = Vec::with_capacity(max_bytes.min(8192));
+    let mut handle = file.take(max_bytes as u64);
+    handle.read_to_end(&mut buffer)?;
+    Ok(buffer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn read_file_prefix_respects_max_bytes() {
+        let dir = tempdir().expect("temp dir should be created");
+        let file_path = dir.path().join("large.txt");
+        fs::write(&file_path, vec![b'a'; 4096]).expect("test file should be written");
+
+        let bytes = read_file_prefix(&file_path, 128).expect("prefix read should succeed");
+        assert_eq!(bytes.len(), 128);
+        assert!(bytes.iter().all(|value| *value == b'a'));
+    }
+
+    #[test]
+    fn read_file_prefix_reads_full_small_file() {
+        let dir = tempdir().expect("temp dir should be created");
+        let file_path = dir.path().join("small.txt");
+        fs::write(&file_path, b"hello").expect("test file should be written");
+
+        let bytes = read_file_prefix(&file_path, 128).expect("prefix read should succeed");
+        assert_eq!(bytes, b"hello");
+    }
 }
