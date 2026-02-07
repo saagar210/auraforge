@@ -552,6 +552,20 @@ Scope:
 Status:
 - Completed 2026-02-07.
 
+### Block E: Local Provider Contract Hardening (Phase 3)
+
+Objective:
+- Normalize local provider behavior and reduce provider-branching drift across runtime paths.
+
+Scope:
+1. Introduce explicit provider kind resolution (`ollama`, `openai_compatible` aliases).
+2. Route model listing, connection checks, model checks, streaming, and generation through normalized provider kind handling.
+3. Keep pull-model enforcement explicit for Ollama-only behavior.
+4. Add regression tests for provider parsing and unsupported-provider validation.
+
+Status:
+- Completed 2026-02-07.
+
 ### Block D: Filesystem and Persistence Robustness (Phase 2)
 
 Objective:
