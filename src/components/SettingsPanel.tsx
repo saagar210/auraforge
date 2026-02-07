@@ -82,9 +82,22 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   }, [open, loadConfig, listModels]);
 
   if (!open) return null;
+  const missingTavilyKey =
+    searchEnabled &&
+    searchProvider === "tavily" &&
+    tavilyApiKey.trim().length === 0;
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveError(null);
+
+    if (missingTavilyKey) {
+      setSaving(false);
+      setSaveError(
+        "Tavily is selected but API key is empty. Add a key or switch provider.",
+      );
+      return;
+    }
 
     const llm: LLMConfig = {
       provider: "ollama",
@@ -225,6 +238,11 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                       placeholder="Optional Tavily API key (tvly-...)"
                       className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
                     />
+                    {missingTavilyKey && (
+                      <p className="text-xs text-status-warning">
+                        Tavily requires an API key. Add one or use DuckDuckGo/SearXNG.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -424,6 +442,11 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                             placeholder="tvly-..."
                             className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors font-mono text-[13px]"
                           />
+                          {missingTavilyKey && (
+                            <p className="text-xs text-status-warning mt-1.5">
+                              Tavily key is required when Tavily provider is selected.
+                            </p>
+                          )}
                         </div>
                       )}
 
@@ -528,7 +551,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           </button>
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || missingTavilyKey}
             className="px-4 py-2 bg-accent-gold text-void text-sm font-medium rounded-lg hover:bg-accent-gold/90 transition-colors cursor-pointer disabled:opacity-50 border-none"
           >
             {saving ? "Saving..." : "Save"}
