@@ -132,3 +132,12 @@ Implemented smallest safe fixes first (highest severity first), each in an isola
 1. Implement and validate Windows-safe config replacement path (`save_config`) with platform-targeted tests.
 2. Tighten CSP directives and verify markdown/render workflows still function.
 3. Add minimal integration coverage for `chatStore` async race/cancel scenarios and stream event handling.
+
+## Update: Audit Fixes Completed (2026-02-07)
+- Replaced remaining generic runtime error paths with typed `validation_error` responses across retry/forge target/readiness flows.
+- Strengthened DB transaction safety for session update and retry cleanup paths, with new regression tests.
+- Hardened Tauri CSP by removing `unsafe-eval` and adding restrictive directives (`base-uri`, `form-action`, `frame-ancestors`, `object-src`).
+
+### Remaining Audit Risks
+1. Windows-specific config replacement semantics are still deferred (Windows is currently out of active scope).
+2. Frontend/Tauri integration tests for async event race paths are still limited.
