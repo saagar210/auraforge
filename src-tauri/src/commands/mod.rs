@@ -451,9 +451,10 @@ pub async fn send_message(
                 ))
             })?;
         // Remove the old assistant response to avoid duplicates
-        if let Err(e) = state.db.delete_last_assistant_message(&session_id) {
-            log::warn!("Failed to delete old assistant message on retry: {}", e);
-        }
+        state
+            .db
+            .delete_last_assistant_message(&session_id)
+            .map_err(to_response)?;
         last_user
     } else {
         state

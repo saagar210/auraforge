@@ -143,21 +143,23 @@ impl Database {
         name: Option<&str>,
         status: Option<&str>,
     ) -> Result<Session, rusqlite::Error> {
-        let conn = self.conn();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
 
         if let Some(n) = name {
-            conn.execute(
+            tx.execute(
                 "UPDATE sessions SET name = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
                 params![n, session_id],
             )?;
         }
         if let Some(s) = status {
-            conn.execute(
+            tx.execute(
                 "UPDATE sessions SET status = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
                 params![s, session_id],
             )?;
         }
 
+        tx.commit()?;
         Self::read_session_row(&conn, session_id)
     }
 
@@ -257,8 +259,9 @@ impl Database {
     }
 
     pub fn delete_last_assistant_message(&self, session_id: &str) -> Result<bool, rusqlite::Error> {
-        let conn = self.conn();
-        let rows = conn.execute(
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let rows = tx.execute(
             "DELETE FROM messages WHERE id = (
                 SELECT id FROM messages
                 WHERE session_id = ?1 AND role = 'assistant'
@@ -266,6 +269,13 @@ impl Database {
             )",
             params![session_id],
         )?;
+        if rows > 0 {
+            tx.execute(
+                "UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+                params![session_id],
+            )?;
+        }
+        tx.commit()?;
         Ok(rows > 0)
     }
 
@@ -586,6 +596,17 @@ mod tests {
     }
 
     #[test]
+    fn update_session_name_and_status_together() {
+        let db = test_db();
+        let session = db.create_session(None).unwrap();
+        let updated = db
+            .update_session(&session.id, Some("Renamed"), Some("completed"))
+            .unwrap();
+        assert_eq!(updated.name, "Renamed");
+        assert_eq!(updated.status, "completed");
+    }
+
+    #[test]
     fn delete_session() {
         let db = test_db();
         let session = db.create_session(None).unwrap();
@@ -708,6 +729,23 @@ mod tests {
 
         let deleted = db.delete_last_assistant_message(&session.id).unwrap();
         assert!(!deleted);
+    }
+
+    #[test]
+    fn delete_last_assistant_updates_session_timestamp() {
+        let db = test_db();
+        let session = db.create_session(None).unwrap();
+        db.save_message(&session.id, "user", "q1", None).unwrap();
+        db.save_message(&session.id, "assistant", "a1", None)
+            .unwrap();
+        let before = db.get_session(&session.id).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let deleted = db.delete_last_assistant_message(&session.id).unwrap();
+        assert!(deleted);
+
+        let after = db.get_session(&session.id).unwrap();
+        assert!(after.updated_at > before.updated_at);
     }
 
     #[test]
