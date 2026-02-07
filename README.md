@@ -271,13 +271,13 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 
 ### Next
 
-- [ ] Confidence scoring — post-generation assessment of document completeness
+- [x] Confidence scoring — post-generation assessment of document completeness
 - [ ] Planning coverage UI — sidebar indicator tracking topic coverage during conversation
 - [ ] Audit report fixes — structured error handling (`AppError`), transaction safety, CSP hardening (see AUDIT_REPORT.md)
 
 ### Future
 
-- [ ] Windows and Linux builds
+- [ ] Linux builds (Windows deferred)
 - [ ] Additional local model runtimes (LM Studio/Ollama-compatible endpoints)
 - [ ] Project templates for common app types
 - [ ] Import existing codebases for refactoring plans

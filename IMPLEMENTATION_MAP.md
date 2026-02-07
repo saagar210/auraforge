@@ -1,520 +1,538 @@
-# AuraForge Implementation Map (Roadmap Remainder)
+# AuraForge Implementation Plan (Roadmap Remainder)
 
 Updated: 2026-02-07
 Owner: Engineering
+Status: Step 1 complete (`confidence scoring`), remaining items planned below
 
-## 1) Scope and constraints
+## 1) Fixed Product Constraints
 
-This map covers all unchecked roadmap items in `README.md`:
+These constraints are mandatory for all remaining work:
 
-1. Confidence scoring
-2. Planning coverage UI
-3. Audit report fixes (`AppError`, transaction safety, CSP hardening)
-4. Windows and Linux builds
-5. Additional local model runtimes (LM Studio/Ollama-compatible endpoints)
-6. Project templates
-7. Import existing codebases for refactoring plans
-8. Export to GitHub Issues / Linear integration
-9. Conversation branching
+1. **Local-first model execution**
+- Do not require paid remote APIs for core usage.
+- Keep Ollama as default.
+- New providers must support local/self-hosted endpoints.
 
-Non-negotiable constraints:
+2. **Web search remains enabled**
+- Keep Tavily + existing search providers as part of grounding.
+- Search is advisory input, not a hard dependency for forge completion.
 
-- Keep model inference local-first by default.
-- Keep existing local folder export flow as a stable finish line.
-- Prefer incremental delivery with small, testable slices.
-- No architecture rewrite unless needed for correctness/security.
+3. **Local folder export remains the finish line**
+- `Save to folder` remains the primary outcome for completed planning sessions.
+- New features must not block or complicate this path.
 
-## 2) Current baseline
+4. **No external PM integrations in this phase**
+- Notion/Linear/Jira/GitHub issue sync is explicitly deferred.
+- Keep integration surfaces out of active implementation scope.
 
-- Frontend: React 19 + TypeScript + Zustand.
-- Backend: Tauri 2 + Rust + SQLite.
-- Core forge pipeline includes:
-  - Readiness analysis
-  - Target-aware `MODEL_HANDOFF.md`
-  - Export `manifest.json`
-- Stability hardening already completed:
-  - Session race fixes
-  - Streaming interruption handling
-  - Atomic export staging
-  - Deterministic DB ordering
+5. **Platform focus**
+- Active runtime target: macOS + Linux.
+- Windows work is documented as deferred unless priorities change.
 
-## 3) Delivery sequence (recommended)
+## 2) Scope (What Is Left)
 
-Execution order is designed to reduce risk:
+## 2.1 Active roadmap items
 
-1. Confidence scoring
-2. Planning coverage UI
-3. Audit report fixes (`AppError`, transaction safety, CSP)
-4. Additional local model runtimes
-5. Project templates
-6. Import existing codebases
-7. Conversation branching
-8. Windows and Linux builds
-9. GitHub/Linear export integration
+1. Planning coverage UI
+2. Audit report fixes
+- structured `AppError`
+- transaction safety
+- CSP hardening
+3. Additional local model runtimes (LM Studio / OpenAI-compatible local endpoints)
+4. Project templates for common app types
+5. Import existing codebases for refactoring plans
+6. Conversation branching
+7. Linux build/release hardening (Windows deferred)
 
-Reasoning:
+## 2.2 Explicitly deferred
 
-- Items 1-3 improve correctness and transparency now.
-- Items 4-7 expand core product capability.
-- Item 8 is packaging/distribution-heavy and easier after runtime features stabilize.
-- Item 9 is optional external integration and can be gated by user demand.
+1. Export to GitHub Issues / Linear integration
+- Deferred to avoid integration complexity and credential surfaces.
+- Re-evaluate only after core local planning loop is fully hardened.
 
-## 4) Detailed implementation map by roadmap item
+2. Windows build support
+- Deferred per current product direction.
+- Keep code changes Windows-safe where easy, but do not spend delivery time on Windows packaging/debugging.
 
-## 4.1 Confidence scoring
+## 3) Engineering Guardrails
 
-Goal:
+These guardrails apply to every item below:
 
-- Produce a post-generation confidence score that reflects document completeness and coherence.
+1. One logical change per commit.
+2. No large dependency additions without written justification in PR body.
+3. Preserve command and data backward compatibility where possible.
+4. All cross-boundary errors must become user-safe `AppError` variants.
+5. DB writes that represent one user action must be transactional.
+6. Export writes remain atomic (stage + rename).
 
-Design:
+## 4) Verification Contract
 
-- Expand existing readiness into a second pass that evaluates generated documents themselves.
-- Use deterministic heuristics first (no extra model call required).
+Run the smallest meaningful checks per step, then full suite at milestone boundaries.
 
-Implementation steps:
+## 4.1 Narrow checks (per change)
 
-1. Backend scoring engine
-- Add `src-tauri/src/docgen/confidence.rs`.
-- Inputs: generated docs + readiness report + session metadata.
-- Checks:
-  - Required files present
-  - Required headings present per file
-  - `[TBD]` density per file
-  - Cross-reference validity (`PROMPTS` references `SPEC` sections, etc.)
-  - Command coverage for implementation phases
-- Output:
-  - `confidence_score` (0-100)
-  - `confidence_factors` array with weighted contributions
-  - `blocking_gaps` array
+- Frontend/type changes: `npx tsc --noEmit` and targeted `npm run build` when UI affected.
+- Rust backend changes: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, targeted `cargo test <module_or_name>`.
 
-2. Persistence and commands
-- Add confidence fields into `generation_metadata` JSON payload.
-- Add command: `get_generation_confidence(session_id)`.
+## 4.2 Milestone checks (after each roadmap item)
 
-3. UI
-- Show confidence badge in preview header and in `MODEL_HANDOFF.md`.
-- Provide human-readable reasons for low confidence.
-
-4. Tests
-- Unit tests for each scoring factor in Rust.
-- Fixture-based tests with synthetic docs.
-
-Acceptance criteria:
-
-- Confidence score is returned for every generation.
-- Score decreases predictably when sections are missing.
-- No additional network calls required.
-
-Verification:
-
-- `cargo test` (new confidence tests)
+- `npx tsc --noEmit`
 - `npm run build`
+- `cd src-tauri && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test && cargo build`
 
-Risks:
+## 4.3 Release gate (after all active items)
 
-- Overly strict heuristics causing false low scores.
-- Mitigation: calibrated thresholds + explainability in score breakdown.
+- Full milestone checks
+- `npm run tauri build` on macOS
+- Linux bundle build in CI (or local Linux runner)
 
-## 4.2 Planning coverage UI
+## 5) Execution Order (No Week Buckets)
 
-Goal:
+Ordered to reduce risk and avoid backtracking:
 
-- Show real-time planning topic coverage while chatting.
+1. Planning coverage UI
+2. Audit report fixes (`AppError`, transaction safety, CSP)
+3. Additional local model runtimes
+4. Project templates
+5. Import existing codebases
+6. Conversation branching
+7. Linux build/release hardening
+
+## 6) Detailed Implementation Plan by Item
+
+## 6.1 Planning Coverage UI
+
+### Objective
+Provide real-time visibility into conversation coverage (must-have vs should-have topics) before forging, without blocking normal chat flow.
+
+### Why now
+Confidence scoring is complete; coverage is the complementary pre-forge signal.
+
+### Backend tasks
+
+1. Add coverage command and result model.
+- Files:
+  - `src-tauri/src/types.rs`
+  - `src-tauri/src/commands/mod.rs`
+  - `src-tauri/src/lib.rs`
+- Add:
+  - `CoverageTopicStatus { topic, tier, status, evidence_message_ids }`
+  - `CoverageReport { must_have, should_have, summary }`
+  - `get_planning_coverage(session_id)` command.
+
+2. Reuse readiness analysis internals.
+- Files:
+  - `src-tauri/src/docgen/quality.rs`
+- Refactor readiness extraction so coverage and readiness share one source of truth.
 
-Design:
+3. Persist optional snapshot for export context.
+- Files:
+  - `src-tauri/src/db/mod.rs`
+  - `src-tauri/src/types.rs`
+- Add nullable `coverage_json` field in `generation_metadata` (migrated safely like `confidence_json`).
 
-- Reuse backend readiness categories; expose per-topic status to frontend.
+### Frontend tasks
 
-Implementation steps:
+1. Add coverage state and fetch action.
+- File:
+  - `src/stores/chatStore.ts`
+- Add:
+  - `planningCoverage: CoverageReport | null`
+  - `getPlanningCoverage()` action.
+
+2. Add collapsible sidebar section.
+- Files:
+  - `src/components/Sidebar.tsx`
+  - `src/App.tsx`
+  - `src/types.ts`
+- Show status chips (`Missing`, `Partial`, `Covered`) grouped by tier.
+- Add one-click prompt inject actions for missing must-have topics.
 
-1. Backend
-- Add command: `get_planning_coverage(session_id)`.
-- Return structured topic map:
-  - `must_have`: each topic as `missing|partial|covered`
-  - `should_have`: same
-  - evidence snippets (message ids)
+3. Keep UX non-blocking.
+- Forge remains allowed.
+- If must-haves are missing, show advisory copy only.
 
-2. Frontend
-- Add coverage panel in sidebar.
-- Update status on message send completion and session switch.
-- Include CTA buttons:
-  - “Ask about missing topic”
-  - “Forge anyway”
+### Tests
 
-3. UX safeguards
-- Keep panel read-only by default.
-- Do not block chat actions; advisory only.
+- Rust:
+  - Unit tests for topic status mapping in `quality.rs`.
+- Frontend:
+  - Store-level tests for refresh on session switch and message completion.
 
-4. Tests
-- Store tests for refresh timing and session isolation.
-- Snapshot tests for panel states.
+### Acceptance criteria
 
-Acceptance criteria:
+1. Coverage updates after each assistant response and on session switch.
+2. No leakage between sessions.
+3. Missing must-have topics are visible before forge.
+4. No change to final export behavior.
 
-- Coverage updates within one chat turn.
-- No state leakage between sessions.
-- Must-have gaps visible before forge.
+### Rollback strategy
 
-Verification:
+Feature-flag coverage panel rendering behind store availability; if regressions appear, disable UI while retaining backend command.
 
-- `npm run build`
-- Frontend store tests for coverage refresh.
+## 6.2 Audit Report Fixes
 
-Risks:
+## 6.2.1 Structured `AppError`
 
-- UI clutter.
-- Mitigation: collapsible panel and concise labels.
+### Objective
+Remove generic runtime errors and standardize frontend-safe error payloads.
 
-## 4.3 Audit report fixes
+### Backend tasks
 
-This roadmap item includes three subprojects.
+1. Expand `AppError` variants and metadata.
+- File:
+  - `src-tauri/src/error.rs`
+- Add structured variants for:
+  - invalid input
+  - not found
+  - permission denied
+  - dependency unavailable
+  - operation interrupted
+  - serialization/parse failures
 
-### 4.3.1 Structured `AppError` hardening
+2. Replace broad `Unknown` usages.
+- Files:
+  - `src-tauri/src/commands/mod.rs`
+  - `src-tauri/src/llm/mod.rs`
+  - `src-tauri/src/config.rs`
+  - `src-tauri/src/db/mod.rs`
+- Ensure conversion keeps stable fields:
+  - `code`
+  - `message`
+  - `recoverable`
+  - `action_hint` (optional)
 
-Goal:
+### Frontend tasks
 
-- Ensure all backend errors crossing the Tauri boundary are typed, actionable, and consistent.
+1. Normalize display and fallback logic.
+- Files:
+  - `src/utils/errorMessages.ts`
+  - `src/stores/chatStore.ts`
+  - `src/components/Toast.tsx`
 
-Implementation steps:
+### Tests
 
-1. Enumerate all `AppError::Unknown` uses; replace with specific variants.
-2. Ensure every command maps failures to user-safe messages and machine-safe codes.
-3. Add context fields (`path`, `operation`, `session_id`) where relevant.
-4. Standardize frontend normalization path for consistent toast/error rendering.
+- Rust unit tests for error conversions and JSON-safe serialization.
+- Frontend tests for known error codes -> user message mapping.
 
-Acceptance criteria:
+### Acceptance criteria
 
-- No `Unknown` in normal runtime paths.
-- Every error has stable `code`, `message`, `recoverable`, optional `action`.
+1. No runtime `Unknown` errors in normal code paths.
+2. User-facing errors are actionable and non-technical.
+3. Logs retain technical context.
 
-Verification:
+## 6.2.2 Transaction safety
 
-- Rust unit tests for error conversion.
-- Smoke tests for representative error cases.
+### Objective
+Guarantee action-level atomicity for multi-step DB operations.
 
-### 4.3.2 Transaction safety pass
+### Tasks
 
-Goal:
+1. Enumerate write workflows and wrap transaction boundaries.
+- File:
+  - `src-tauri/src/db/mod.rs`
+- Workflows:
+  - save message + metadata
+  - forge output document replacement
+  - generation metadata upsert + associated records
+  - branch operations (future item dependency)
 
-- Ensure multi-step DB/file operations are atomic and recoverable.
+2. Ensure command-level consistency.
+- File:
+  - `src-tauri/src/commands/mod.rs`
+- Avoid partial state when downstream step fails.
 
-Implementation steps:
+3. Add failure-injection tests.
+- Use temporary DB and simulated mid-transaction errors.
 
-1. Review DB mutations in commands and DB module.
-2. Wrap multi-write workflows in explicit transactions where missing.
-3. Add rollback-safe behavior for mixed DB + filesystem paths.
-4. Extend tests for concurrent operations and failure injection.
+### Acceptance criteria
 
-Acceptance criteria:
+1. No partial DB state from injected failures.
+2. `save_to_folder` and metadata remain coherent with document state.
 
-- No partial DB state after injected failures.
-- Export and generation metadata stay consistent.
+## 6.2.3 CSP hardening
 
-Verification:
+### Objective
+Reduce CSP permissions while maintaining current UI behavior.
 
-- `cargo test` with added failure-path tests.
+### Tasks
 
-### 4.3.3 CSP hardening
+1. Tighten CSP incrementally.
+- File:
+  - `src-tauri/tauri.conf.json`
+- Targets:
+  - remove/limit `'unsafe-eval'`
+  - reduce `'unsafe-inline'` usage where feasible
+  - constrain `connect-src` to required local/search endpoints
 
-Goal:
+2. Validate renderer/runtime compatibility.
+- Files impacted by behavior:
+  - `src/components/DocumentPreview.tsx`
+  - markdown/highlight stack
 
-- Minimize CSP allowances while preserving app functionality.
+3. Add CSP troubleshooting section.
+- Files:
+  - `README.md`
+  - `AUDIT_REPORT.md`
 
-Implementation steps:
+### Acceptance criteria
 
-1. Audit current `tauri.conf.json` CSP directives.
-2. Remove unnecessary `'unsafe-*'` gradually.
-3. Validate markdown rendering, code highlighting, plugins, and links after each change.
-4. Add CSP regression checklist in docs.
+1. CSP is strictly tighter than current baseline.
+2. No regression in markdown rendering, syntax highlighting, link opening, or search.
 
-Acceptance criteria:
+## 6.3 Additional Local Model Runtimes
 
-- CSP is stricter than current baseline.
-- No broken UI rendering/features.
+### Objective
+Support more local/self-hosted endpoints without introducing paid-cloud dependency requirements.
 
-Verification:
+### Target support
 
-- `npm run build`
-- Manual runtime checks in dev and packaged app.
+1. Ollama (existing baseline)
+2. OpenAI-compatible local endpoint profile (for LM Studio and compatible runtimes)
 
-Risks:
+### Backend tasks
 
-- CSP tightening can break rendering unexpectedly.
-- Mitigation: tighten in small increments with immediate validation.
-
-## 4.4 Windows and Linux builds
-
-Goal:
-
-- Ship installers/artifacts for macOS, Windows, and Linux.
-
-Implementation steps:
-
-1. Platform readiness audit
-- Replace macOS assumptions in shell usage, paths, permissions.
-- Gate platform-specific code via cfg flags.
-
-2. CI matrix
-- Add GitHub Actions matrix for:
-  - macOS
-  - ubuntu
-  - windows
-- Run:
-  - frontend build
-  - `cargo fmt --check`
-  - `cargo clippy -- -D warnings`
-  - `cargo test`
-  - `tauri build` artifact creation
-
-3. Packaging docs
-- Add per-platform install and troubleshooting.
-
-Acceptance criteria:
-
-- Successful CI builds and release artifacts on all target OSes.
-- Startup and core flows verified on each OS.
-
-Verification:
-
-- CI matrix green.
-- Manual smoke test checklist per platform.
-
-Risks:
-
-- Filesystem and path edge cases differ by OS.
-- Mitigation: centralized path utilities + platform test coverage.
-
-## 4.5 Additional local model runtimes
-
-Goal:
-
-- Support local runtimes beyond default Ollama while keeping local-first posture.
-
-Design:
-
-- Introduce runtime adapter interface instead of hardcoding Ollama assumptions.
-
-Implementation steps:
-
-1. Backend abstraction
-- Add `llm::provider` trait with capabilities:
+1. Add provider abstraction.
+- Files:
+  - `src-tauri/src/llm/mod.rs`
+  - create `src-tauri/src/llm/providers/` modules
+- Provider contract:
   - health check
   - list models
-  - stream chat
-  - pull model (optional capability)
+  - chat streaming
+  - optional model pull
+
+2. Extend config schema.
+- Files:
+  - `src-tauri/src/config.rs`
+  - `src-tauri/src/types.rs`
+- Add provider config blocks (base URL, headers, model naming rules).
+- Keep defaults local and free.
+
+3. Update command plumbing.
+- File:
+  - `src-tauri/src/commands/mod.rs`
+- Route chat/generation through selected provider.
+
+### Frontend tasks
 
-2. Providers
-- Keep existing Ollama adapter.
-- Add OpenAI-compatible local endpoint adapter (for LM Studio/Ollama-compatible servers).
+1. Provider selector and endpoint settings.
+- Files:
+  - `src/components/SettingsPanel.tsx`
+  - `src/stores/chatStore.ts`
+  - `src/types.ts`
+- Include safe validation and clear “local only” copy.
 
-3. Config
-- Keep default provider as Ollama.
-- Add explicit provider mode without enabling remote paid APIs by default.
+### Tests
 
-4. Frontend
-- Provider selection in advanced settings with clear local-only labels.
+- Provider contract tests with mocked streams.
+- Config validation tests for each provider mode.
 
-Acceptance criteria:
+### Acceptance criteria
 
-- Existing Ollama flow unchanged.
-- Alternate local-compatible endpoint works for chat + generation.
+1. Existing Ollama workflow unchanged.
+2. LM Studio-compatible endpoint can run chat + forge pipeline.
+3. No mandatory API key requirement for core flows.
 
-Verification:
+## 6.4 Project Templates
 
-- Provider contract tests.
-- End-to-end smoke on both adapters.
+### Objective
+Offer predefined planning starters to reduce ambiguity and improve plan quality.
 
-Risks:
+### Tasks
 
-- Streaming protocol differences across runtimes.
-- Mitigation: adapter-specific parser modules + fallback handling.
+1. Add template schema and loader.
+- Files:
+  - create `src-tauri/src/templates/mod.rs`
+  - create `src-tauri/templates/*.json`
+- Template fields:
+  - `id`, `name`, `description`, `target_stack`, `seed_questions`, `seed_constraints`, `version`
 
-## 4.6 Project templates for common app types
+2. Add commands.
+- Files:
+  - `src-tauri/src/commands/mod.rs`
+  - `src-tauri/src/lib.rs`
+- Commands:
+  - `list_templates`
+  - `start_session_from_template`
+
+3. Frontend template picker.
+- Files:
+  - `src/components/OnboardingWizard.tsx`
+  - `src/stores/chatStore.ts`
+
+4. Template evolution contract.
+- Add schema versioning/migration with strict validation.
+
+### Tests
+
+- Template parsing/validation tests.
+- Session bootstrap tests for initial prompt injection.
+
+### Acceptance criteria
+
+1. User can choose template at session start.
+2. Conversation starts with deterministic, template-guided context.
+3. Local export output remains compatible.
+
+## 6.5 Import Existing Codebases
+
+### Objective
+Allow local repo ingestion to generate refactor-oriented planning documents grounded in existing code.
 
-Goal:
+### Tasks
 
-- Speed planning by offering structured starting templates.
+1. Build safe ingestion pipeline.
+- Files:
+  - create `src-tauri/src/import/mod.rs`
+  - extend `src-tauri/src/commands/mod.rs`
+- Inputs:
+  - selected root path
+  - include/exclude globs
+  - size/token budgets
+- Outputs:
+  - structured codebase summary persisted per session
+
+2. Privacy and stability constraints.
+- Enforce local-only processing.
+- Hard caps for file size, file count, and aggregate bytes.
+- Return actionable errors for permission denied and binary files.
+
+3. Prompt integration.
+- Include import summary in context for planning/refactor mode.
+- Add explicit marker in `MODEL_HANDOFF.md` and `manifest.json`.
+
+4. UI flow.
+- Files:
+  - `src/components/OnboardingWizard.tsx`
+  - `src/components/Sidebar.tsx`
+  - `src/stores/chatStore.ts`
+- Add import chooser, scan progress, and cancellation.
 
-Implementation steps:
+### Tests
 
-1. Template catalog
-- Add local JSON/YAML templates:
-  - SaaS web app
-  - Tauri desktop app
-  - CLI tool
-  - API service
+- Import filter tests (`.gitignore`, globs, large file skips).
+- Performance test on medium-size fixture repo.
+- UI state tests for cancellation and failure recovery.
 
-2. Session bootstrap
-- Allow “Start from template” when creating session.
-- Inject template context as initial system/user messages.
+### Acceptance criteria
 
-3. Template versioning
-- Add version field + migration path for template schema.
+1. User can import a local codebase without freezing UI.
+2. Forge output references actual imported context.
+3. Export remains local and deterministic.
+
+## 6.6 Conversation Branching
 
-Acceptance criteria:
+### Objective
+Support alternate planning paths without losing main thread history.
 
-- User can pick template and immediately get better-scaffolded planning dialogue.
-- Templates are local files editable by maintainers.
+### Data model
 
-Verification:
+1. Session contains many branches.
+2. Branch contains message lineage.
+3. Forge runs against selected branch only.
 
-- Unit tests for template loading/validation.
-- UI flow smoke tests.
+### Tasks
 
-Risks:
+1. DB schema migration.
+- File:
+  - `src-tauri/src/db/mod.rs`
+- Add:
+  - `branches` table
+  - `messages.branch_id`
+  - branch metadata (`name`, `created_from_message_id`, timestamps)
 
-- Template drift over time.
-- Mitigation: template ownership + quarterly review checklist.
+2. Branch commands.
+- Files:
+  - `src-tauri/src/commands/mod.rs`
+  - `src-tauri/src/lib.rs`
+- Commands:
+  - `create_branch`
+  - `list_branches`
+  - `switch_branch`
+  - `rename_branch`
 
-## 4.7 Import existing codebases for refactoring plans
+3. Frontend branch UX.
+- Files:
+  - `src/components/Sidebar.tsx`
+  - `src/stores/chatStore.ts`
+  - `src/types.ts`
+- Add:
+  - branch selector
+  - “fork from message” action in `ChatMessage`
 
-Goal:
+4. Generation/export isolation.
+- Ensure documents/metadata are branch-scoped.
+- Include `branch_id` in manifest metadata.
 
-- Allow users to point AuraForge at a repo and generate refactor plans grounded in real code.
+### Tests
 
-Implementation steps:
+- DB lineage integrity tests.
+- Store tests for rapid branch switching.
+- Generation tests confirming branch isolation.
 
-1. Ingestion pipeline
-- Add safe local repo scanner:
-  - file tree summary
-  - dependency files
-  - selected source snippets
-- Respect ignore patterns and size limits.
+### Acceptance criteria
 
-2. Privacy/safety
-- Local-only processing.
-- Explicit include/exclude controls.
+1. Branches cannot corrupt each other’s timelines.
+2. User can fork, switch, and forge branch-specific outputs reliably.
 
-3. Prompt integration
-- Add “refactor mode” conversation seed with repository context.
+## 6.7 Linux Build and Distribution Hardening
 
-4. Export
-- Include imported-context summary in generated docs and manifest.
+### Objective
+Make Linux a first-class supported desktop target.
 
-Acceptance criteria:
+### Tasks
 
-- User can import a local path and generate a refactor-focused plan.
-- Large repos handled without UI freeze.
+1. CI Linux pipeline.
+- Add/expand workflow under `.github/workflows/`:
+  - frontend build
+  - Rust checks
+  - Tauri Linux bundle artifact
 
-Verification:
+2. Runtime smoke checklist.
+- Validate:
+  - startup
+  - chat stream
+  - forge
+  - save-to-folder
+  - settings persistence
 
-- Performance tests on medium/large repo samples.
-- Error-path tests for permission-denied and malformed files.
+3. Packaging docs.
+- Update `README.md` install section with Linux artifacts and troubleshooting.
 
-Risks:
+### Acceptance criteria
 
-- Context overload and latency.
-- Mitigation: chunking + summarization caps + UI progress indicators.
+1. Linux CI build is green for release branch.
+2. Linux smoke checklist passes.
 
-## 4.8 Export to GitHub Issues / Linear integration
+### Note on Windows
+Windows remains deferred; keep changes portability-safe but do not block roadmap completion on Windows packaging.
 
-Goal:
+## 7) Commit Plan (One Logical Change Per Commit)
 
-- Optional push of generated phase tasks into external trackers.
+Recommended commit sequence:
 
-Implementation steps:
+1. `feat(coverage): add planning coverage backend and sidebar UI`
+2. `fix(error): replace unknown runtime failures with typed AppError variants`
+3. `fix(db): enforce transaction boundaries for multi-step writes`
+4. `chore(security): tighten tauri csp directives`
+5. `feat(llm): add local openai-compatible provider adapter`
+6. `feat(templates): add template-based session bootstrap`
+7. `feat(import): add local codebase ingestion for refactor mode`
+8. `feat(branching): add branch-aware conversation flows`
+9. `build(linux): add linux packaging checks and docs`
 
-1. Integration boundaries
-- Keep local export as default and primary flow.
-- Add explicit opt-in integration page.
+## 8) Definition of Done
 
-2. Data mapping
-- Map `PROMPTS.md` phases to issue tickets with labels/milestones.
-- Preserve local source of truth (`manifest.json` + docs).
+A roadmap item is complete only when all conditions are true:
 
-3. Credentials
-- Secure token storage via OS keychain facilities.
+1. Functional behavior matches acceptance criteria.
+2. Narrow checks pass for each commit.
+3. Milestone checks pass after item completion.
+4. Error paths are handled and tested.
+5. `README.md` roadmap status is updated.
+6. `Save to folder` path remains stable and verified.
 
-4. Retry and idempotency
-- Prevent duplicate issue creation on retries.
+## 9) Immediate Next Action
 
-Acceptance criteria:
-
-- User can export phases as issues with deterministic mapping.
-- Integration failure never blocks local export.
-
-Verification:
-
-- Integration tests with mock APIs.
-- Manual test against sandbox repos/workspaces.
-
-Risks:
-
-- Scope creep from third-party API differences.
-- Mitigation: narrow v1 scope to create/update only.
-
-## 4.9 Conversation branching
-
-Goal:
-
-- Let users explore alternate planning decisions without losing the main thread.
-
-Design:
-
-- Tree model: session has branches, each branch has message lineage.
-
-Implementation steps:
-
-1. DB schema
-- Add `branches` table and branch-aware message linkage.
-
-2. Backend commands
-- Create branch, switch branch, list branches, merge summary.
-
-3. Frontend UX
-- Branch picker in sidebar.
-- “Fork from message” action.
-
-4. Doc generation
-- Forge per selected branch only.
-- Include branch id/name in manifest and handoff doc.
-
-Acceptance criteria:
-
-- Branching does not corrupt main timeline.
-- Generation/export works independently per branch.
-
-Verification:
-
-- DB tests for lineage integrity.
-- Store tests for branch switching and session isolation.
-
-Risks:
-
-- Complexity in message/event filtering.
-- Mitigation: branch id propagated through every command/event payload.
-
-## 5) Cross-cutting engineering standards for all items
-
-Required for every roadmap implementation:
-
-1. Code quality gates
-- `npm run build`
-- `cargo fmt --check`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo test`
-- `cargo build`
-
-2. Change discipline
-- One logical change per commit.
-- Conventional commits only.
-- No broad refactors without explicit requirement.
-
-3. Documentation updates
-- Update `README.md` roadmap item status when complete.
-- Update `AUDIT_REPORT.md` if risk posture changes.
-
-4. Export stability contract
-- Local folder export remains available and functional for all features.
-- `manifest.json` remains backward-compatible and versioned when schema changes.
-
-## 6) Definition of done (global)
-
-A roadmap item is complete only when all are true:
-
-1. Functional acceptance criteria met.
-2. Automated checks pass.
-3. Error paths handled and tested.
-4. Documentation updated.
-5. No regression in core planning -> forge -> save-to-folder flow.
+Start with **Planning Coverage UI** implementation using section 6.1 exactly as written, then progress sequentially by commit plan in section 7.
