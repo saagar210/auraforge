@@ -14,6 +14,7 @@ import {
 import { clsx } from "clsx";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useChatStore } from "../stores/chatStore";
+import { useShallow } from "zustand/react/shallow";
 import type { CoverageStatus } from "../types";
 
 export function Sidebar() {
@@ -34,7 +35,24 @@ export function Sidebar() {
     importCodebaseContext,
     isStreaming,
     isGenerating,
-  } = useChatStore();
+  } = useChatStore(useShallow((s) => ({
+    sessions: s.sessions,
+    currentSessionId: s.currentSessionId,
+    createSession: s.createSession,
+    selectSession: s.selectSession,
+    deleteSession: s.deleteSession,
+    deleteSessions: s.deleteSessions,
+    renameSession: s.renameSession,
+    setShowSettings: s.setShowSettings,
+    setShowHelp: s.setShowHelp,
+    sidebarCollapsed: s.sidebarCollapsed,
+    planningCoverage: s.planningCoverage,
+    getPlanningCoverage: s.getPlanningCoverage,
+    sendMessage: s.sendMessage,
+    importCodebaseContext: s.importCodebaseContext,
+    isStreaming: s.isStreaming,
+    isGenerating: s.isGenerating,
+  })));
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

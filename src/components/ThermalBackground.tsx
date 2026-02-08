@@ -1,7 +1,11 @@
+import { usePageVisible } from "../hooks/usePageVisible";
+
 export function ThermalBackground() {
+  const visible = usePageVisible();
+
   return (
     <div
-      className="thermal-background fixed inset-0 pointer-events-none bg-void"
+      className={`thermal-background fixed inset-0 pointer-events-none bg-void${visible ? "" : " animations-paused"}`}
       style={{ zIndex: 0 }}
       aria-hidden="true"
     >

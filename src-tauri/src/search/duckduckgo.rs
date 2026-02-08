@@ -195,3 +195,67 @@ fn extract_ddg_url(href: &str) -> Option<String> {
         .find(|(k, _)| k == "uddg")
         .map(|(_, v)| v.into_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_results_with_result_class() {
+        let html = r#"
+        <html><body>
+        <div class="result">
+            <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage">Example Title</a>
+            <span class="result__snippet">This is a snippet about the result.</span>
+        </div>
+        <div class="result">
+            <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fother.com">Other Page</a>
+            <span class="result__snippet">Another snippet here.</span>
+        </div>
+        </body></html>
+        "#;
+        let results = parse_results(html).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].title, "Example Title");
+        assert_eq!(results[0].url, "https://example.com/page");
+        assert_eq!(results[0].snippet, "This is a snippet about the result.");
+        assert_eq!(results[1].title, "Other Page");
+        assert_eq!(results[1].url, "https://other.com");
+    }
+
+    #[test]
+    fn parse_results_fallback_with_uddg_links() {
+        // No .result containers, but there are <a> tags with uddg params
+        let html = r#"
+        <html><body>
+        <a href="//duckduckgo.com/l/?uddg=https%3A%2F%2Ffallback.com%2Fpath&rut=abc">Fallback Link</a>
+        <a href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fother-fallback.com&rut=def">Another Link</a>
+        </body></html>
+        "#;
+        let results = parse_results(html).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].title, "Fallback Link");
+        assert_eq!(results[0].url, "https://fallback.com/path");
+        assert!(results[0].snippet.is_empty());
+    }
+
+    #[test]
+    fn parse_results_empty_html_returns_no_results() {
+        let html = "<html><body><p>No search results here.</p></body></html>";
+        let err = parse_results(html).unwrap_err();
+        assert!(matches!(err, SearchError::NoResults));
+    }
+
+    #[test]
+    fn extract_ddg_url_decodes_correctly() {
+        let href = "//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Ffoo%3Fbar%3Dbaz&rut=abc";
+        let url = extract_ddg_url(href).unwrap();
+        assert_eq!(url, "https://example.com/foo?bar=baz");
+    }
+
+    #[test]
+    fn extract_ddg_url_returns_none_for_non_ddg_links() {
+        let href = "https://example.com/plain-link";
+        assert!(extract_ddg_url(href).is_none());
+    }
+}

@@ -4,6 +4,21 @@ use std::sync::Mutex;
 
 use crate::types::*;
 
+/// Validates that a string is a safe SQL identifier (table name, column name, etc.).
+/// Only allows `[a-zA-Z_][a-zA-Z0-9_]*`. Panics on invalid input because callers
+/// always pass hardcoded strings.
+fn validate_identifier(name: &str) {
+    let valid = !name.is_empty()
+        && name.chars().enumerate().all(|(i, c)| {
+            if i == 0 {
+                c.is_ascii_alphabetic() || c == '_'
+            } else {
+                c.is_ascii_alphanumeric() || c == '_'
+            }
+        });
+    assert!(valid, "Invalid SQL identifier: {:?}", name);
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
@@ -548,6 +563,9 @@ impl Database {
         column: &str,
         decl: &str,
     ) -> Result<(), rusqlite::Error> {
+        validate_identifier(table);
+        validate_identifier(column);
+        validate_identifier(decl);
         let pragma = format!("PRAGMA table_info({})", table);
         let mut stmt = conn.prepare(&pragma)?;
         let mut rows = stmt.query([])?;
@@ -962,5 +980,21 @@ mod tests {
         let deleted = db.delete_sessions(&[]).unwrap();
         assert_eq!(deleted, 0);
         assert_eq!(db.get_sessions().unwrap().len(), 1);
+    }
+
+    // ---- Identifier Validation Tests ----
+
+    #[test]
+    fn validate_identifier_accepts_valid_names() {
+        validate_identifier("sessions");
+        validate_identifier("_private");
+        validate_identifier("column_name");
+        validate_identifier("Table123");
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid SQL identifier")]
+    fn validate_identifier_rejects_injection() {
+        validate_identifier("a]b; DROP TABLE");
     }
 }

@@ -384,6 +384,13 @@ pub async fn create_session(
     state: State<'_, AppState>,
     request: CreateSessionRequest,
 ) -> Result<Session, ErrorResponse> {
+    if let Some(ref name) = request.name {
+        if name.len() > 200 {
+            return Err(to_response(AppError::Validation(
+                "Session name too long (max 200 chars).".to_string(),
+            )));
+        }
+    }
     state
         .db
         .create_session(request.name.as_deref())
@@ -543,6 +550,13 @@ pub async fn update_session(
     name: Option<String>,
     status: Option<String>,
 ) -> Result<Session, ErrorResponse> {
+    if let Some(ref n) = name {
+        if n.len() > 200 {
+            return Err(to_response(AppError::Validation(
+                "Session name too long (max 200 chars).".to_string(),
+            )));
+        }
+    }
     match state
         .db
         .update_session(&session_id, name.as_deref(), status.as_deref())
@@ -629,6 +643,12 @@ pub async fn send_message(
     let session_id = request.session_id;
     let content = request.content;
     let is_retry = request.retry.unwrap_or(false);
+
+    if content.len() > 102_400 {
+        return Err(to_response(AppError::Validation(
+            "Message too long (max 100 KB).".to_string(),
+        )));
+    }
 
     // Save user message (skip on retry — message already exists in DB)
     let user_msg = if is_retry {

@@ -114,7 +114,7 @@ SQLite with WAL mode, foreign key cascades, and automatic schema migrations. Con
 Multiple concurrent planning sessions with UUID-based IDs. Sessions auto-name from the first message (truncated to 60 characters). Delete cascades to messages and documents via foreign keys. Sessions ordered by `updated_at` with the most recent first. Message windowing shows the latest 120 messages initially, loading 80 more on scroll-to-top.
 
 ### The Forge Aesthetic
-A dark, atmospheric UI built around the metaphor of crafting. Ember particles drift across a thermal gradient background. Eleven CSS keyframe animations (ember float, thermal drift, molten flow, forge glow, pulse, shimmer) create an atmosphere of focused creation. Custom design tokens define the color system: void backgrounds, molten accents, ember highlights. Typography uses Cinzel for headings, Inter for body, JetBrains Mono for code. Respects `prefers-reduced-motion` — all animations are disabled when the OS preference is set.
+A dark, atmospheric UI built around the metaphor of crafting. Ember particles drift across a thermal gradient background. Eleven CSS keyframe animations (ember float, thermal drift, molten flow, forge glow, pulse, shimmer) create an atmosphere of focused creation. Custom design tokens define the color system: void backgrounds, molten accents, ember highlights. Typography uses Cinzel for headings, Inter for body, JetBrains Mono for code. Respects `prefers-reduced-motion` — all animations are disabled when the OS preference is set. Background animations automatically pause when the app is not visible to save CPU. React error boundaries catch render crashes with a recovery UI instead of a white screen.
 
 ---
 
@@ -149,7 +149,7 @@ A dark, atmospheric UI built around the metaphor of crafting. Ember particles dr
 
 **IPC:** Tauri's type-safe command system bridges frontend and Rust. Streaming responses use event emitters filtered by `session_id` to prevent cross-session contamination. Session-switch guards and operation gating prevent stale async writes and overlapping long-running actions.
 
-**Security:** Content Security Policy restricts connections to `localhost` and configured search endpoints. Tauri capabilities are minimal — only `core`, `dialog`, and `opener` plugins are enabled. Link rendering in chat is restricted to `https:` and `mailto:` schemes.
+**Security:** Content Security Policy restricts connections to `localhost` and configured search endpoints. Tauri capabilities are minimal — only `core`, `dialog`, and `opener` plugins are enabled. Link rendering in chat is restricted to `https:` and `mailto:` schemes. SQL identifiers are validated against injection. URL schemes are restricted to `http`/`https`. Config files are written with `0600` permissions on Unix. Input lengths are capped (100 KB messages, 200-char session names). The importer skips symlinks to prevent traversal attacks.
 
 ---
 
@@ -165,7 +165,7 @@ A dark, atmospheric UI built around the metaphor of crafting. Ember particles dr
 | **Database** | [SQLite](https://sqlite.org) via rusqlite | WAL mode, foreign key cascades, schema migrations |
 | **Search** | DuckDuckGo + [Tavily](https://tavily.com) + [SearXNG](https://docs.searxng.org) | Three providers with automatic failover |
 | **Styling** | [Tailwind CSS 4](https://tailwindcss.com) | Utility-first with `@theme` design tokens |
-| **Markdown** | react-markdown + remark-gfm | GFM rendering with Prism syntax highlighting |
+| **Markdown** | react-markdown + remark-gfm | GFM rendering with PrismLight syntax highlighting (13 languages) |
 | **Build** | [Vite 6](https://vite.dev) | Frontend bundling, HMR in development |
 
 ---
@@ -255,20 +255,24 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 
 | Metric | Result |
 |--------|--------|
-| `npm run test` | **5/5 passing** |
-| `cargo test` | **62/62 passing** |
+| `npm run test` | **23/23 passing** |
+| `cargo test` | **74/74 passing** |
 | `cargo clippy -- -D warnings` | **0 warnings** |
 | `npx tsc --noEmit` | **0 errors** |
 | `npm run tauri build` | **Produces macOS + Linux bundles** |
-| Source lines | **~8,825** across Rust, TypeScript, and CSS |
-| Rust test coverage focus | Config validation, DB operations, search triggers/cache, provider parsing, importer bounds, export manifest integrity |
+| Source lines | **~9,200** across Rust, TypeScript, and CSS |
+| Rust test coverage focus | Config validation, DB operations, search triggers/cache, DuckDuckGo HTML parsing, provider parsing, importer bounds, export manifest integrity, docgen quality scoring |
 
 ### What's Tested
 
 - **Search trigger detection:** 18 unit tests covering technology keywords, question patterns, comparison queries, version lookups, and negative cases
-- **Database operations:** Session CRUD, message cascade deletion, document atomic replacement, assistant message deletion on retry
+- **DuckDuckGo parser:** HTML parsing with `.result` selectors, `uddg` redirect extraction, fallback link extraction, empty-result handling
+- **Database operations:** Session CRUD, message cascade deletion, document atomic replacement, assistant message deletion on retry, SQL identifier validation
+- **Config security:** URL scheme validation (http/https only), file permission enforcement (0600), atomic writes
 - **Provider behavior:** local provider alias parsing + unsupported provider validation
-- **Import/export safety:** importer prefix-read bounds, manifest deterministic ordering/checksum metadata
+- **Import/export safety:** importer prefix-read bounds, symlink traversal prevention, manifest deterministic ordering/checksum metadata
+- **Docgen quality:** plan readiness scoring, coverage analysis for must-have/should-have topics, empty and rich conversation scoring
+- **Frontend components:** ErrorBoundary crash recovery, ConfirmModal interactions, Toast rendering and dismissal, ForgeButton states, EmptyState variants
 - **Frontend async races:** session switch + cancel/timeout race handling in `chatStore`
 
 ---
@@ -306,6 +310,10 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 - [x] Project templates for common app types
 - [x] Import existing codebases for refactoring plans
 - [x] Conversation branching — explore alternate decisions without losing the main thread
+- [x] Security hardening — SQL identifier validation, URL scheme restrictions, config file permissions, input length limits, symlink traversal prevention
+- [x] React quality pass — error boundaries, confirm modals (no more `window.confirm`), `useShallow` selectors to prevent unnecessary re-renders, animation pausing on background tabs
+- [x] Bundle optimization — PrismLight with 13 registered languages instead of full Prism bundle
+- [x] Test coverage expansion — 74 Rust tests, 23 frontend tests across 6 test files
 
 ### Deferred by Scope
 

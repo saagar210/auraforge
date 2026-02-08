@@ -261,6 +261,12 @@ body {
   }
 }
 
+/* Pause all animations when page is backgrounded */
+.animations-paused,
+.animations-paused * {
+  animation-play-state: paused !important;
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,

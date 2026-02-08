@@ -69,6 +69,12 @@ pub fn load_or_create_config() -> (AppConfig, Option<String>) {
                 Some(format!("Failed to write default config: {}", e)),
             );
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            let _ = fs::set_permissions(&path, perms);
+        }
         log::info!("Created default config at {}", path.display());
     }
 
@@ -152,6 +158,15 @@ fn write_config_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
         return Err(format!("Failed to write config: {}", e));
     }
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        if let Err(e) = fs::set_permissions(path, perms) {
+            log::warn!("Failed to set config file permissions: {}", e);
+        }
+    }
+
     sync_directory(parent)?;
     Ok(())
 }
@@ -191,8 +206,18 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
     if config.llm.base_url.trim().is_empty() {
         return Err(ConfigError::MissingField("llm.base_url".to_string()));
     }
-    if let Err(e) = url::Url::parse(&config.llm.base_url) {
-        return Err(ConfigError::InvalidValue(format!("llm.base_url: {}", e)));
+    match url::Url::parse(&config.llm.base_url) {
+        Ok(parsed) => {
+            if parsed.scheme() != "http" && parsed.scheme() != "https" {
+                return Err(ConfigError::InvalidValue(format!(
+                    "llm.base_url: scheme '{}' is not allowed (only http/https)",
+                    parsed.scheme()
+                )));
+            }
+        }
+        Err(e) => {
+            return Err(ConfigError::InvalidValue(format!("llm.base_url: {}", e)));
+        }
     }
 
     let search_provider = config.search.provider.as_str();
@@ -220,11 +245,21 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
         && search_provider == "searxng"
         && !config.search.searxng_url.is_empty()
     {
-        if let Err(e) = url::Url::parse(&config.search.searxng_url) {
-            return Err(ConfigError::InvalidValue(format!(
-                "search.searxng_url: {}",
-                e
-            )));
+        match url::Url::parse(&config.search.searxng_url) {
+            Ok(parsed) => {
+                if parsed.scheme() != "http" && parsed.scheme() != "https" {
+                    return Err(ConfigError::InvalidValue(format!(
+                        "search.searxng_url: scheme '{}' is not allowed (only http/https)",
+                        parsed.scheme()
+                    )));
+                }
+            }
+            Err(e) => {
+                return Err(ConfigError::InvalidValue(format!(
+                    "search.searxng_url: {}",
+                    e
+                )));
+            }
         }
     }
 
@@ -275,6 +310,39 @@ fn normalize_local_model_config(config: &mut AppConfig) -> bool {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    fn default_config() -> AppConfig {
+        serde_yaml::from_str(DEFAULT_CONFIG_YAML).expect("default config should parse")
+    }
+
+    #[test]
+    fn validate_config_accepts_http_base_url() {
+        let config = default_config();
+        assert!(validate_config(&config).is_ok());
+    }
+
+    #[test]
+    fn validate_config_rejects_file_scheme_base_url() {
+        let mut config = default_config();
+        config.llm.base_url = "file:///etc/passwd".to_string();
+        let err = validate_config(&config);
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("not allowed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_config_atomically_sets_0600_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().expect("temp dir should be created");
+        let path = dir.path().join("config.yaml");
+
+        write_config_atomically(&path, b"key: value").expect("write should succeed");
+        let perms = fs::metadata(&path)
+            .expect("file should exist")
+            .permissions();
+        assert_eq!(perms.mode() & 0o777, 0o600);
+    }
 
     #[test]
     fn write_config_atomically_creates_and_replaces_file() {

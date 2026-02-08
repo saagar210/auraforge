@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { usePageVisible } from "../hooks/usePageVisible";
 
 interface Ember {
   id: number;
@@ -9,6 +10,8 @@ interface Ember {
 }
 
 export function EmberParticles() {
+  const visible = usePageVisible();
+
   const embers = useMemo<Ember[]>(
     () =>
       Array.from({ length: 14 }, (_, i) => ({
@@ -23,7 +26,7 @@ export function EmberParticles() {
 
   return (
     <div
-      className="ember-container fixed inset-0 pointer-events-none overflow-hidden"
+      className={`ember-container fixed inset-0 pointer-events-none overflow-hidden${visible ? "" : " animations-paused"}`}
       style={{ zIndex: 0 }}
       aria-hidden="true"
     >

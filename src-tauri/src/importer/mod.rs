@@ -85,10 +85,21 @@ pub fn summarize_codebase(root_path: &str) -> Result<CodebaseImportSummary, AppE
                 break;
             }
 
+            // Use DirEntry::file_type() which does NOT follow symlinks
+            let ft = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+
+            // Skip symlinks entirely to prevent traversal outside the root
+            if ft.is_symlink() {
+                continue;
+            }
+
             let path = entry.path();
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-            if path.is_dir() {
+            if ft.is_dir() {
                 if should_skip_dir(file_name) {
                     continue;
                 }
@@ -96,7 +107,7 @@ pub fn summarize_codebase(root_path: &str) -> Result<CodebaseImportSummary, AppE
                 continue;
             }
 
-            if !path.is_file() || is_hidden(path.as_path()) {
+            if !ft.is_file() || is_hidden(path.as_path()) {
                 continue;
             }
 
@@ -329,5 +340,30 @@ mod tests {
 
         let bytes = read_file_prefix(&file_path, 128).expect("prefix read should succeed");
         assert_eq!(bytes, b"hello");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn summarize_codebase_skips_symlinks() {
+        let dir = tempdir().expect("temp dir should be created");
+        let root = dir.path();
+
+        // Create a real file
+        fs::write(root.join("real.rs"), "fn main() {}").unwrap();
+
+        // Create a symlink pointing outside the root
+        let outside = tempdir().expect("outside dir");
+        let secret = outside.path().join("secret.txt");
+        fs::write(&secret, "TOP SECRET DATA").unwrap();
+        std::os::unix::fs::symlink(&secret, root.join("link.txt")).unwrap();
+
+        let summary = summarize_codebase(root.to_str().unwrap()).unwrap();
+
+        // The real file should be included but the symlink target should not
+        assert!(summary.files_scanned >= 1, "should scan at least the real file");
+        assert!(
+            !summary.summary_markdown.contains("TOP SECRET DATA"),
+            "symlink target content should not appear in summary"
+        );
     }
 }

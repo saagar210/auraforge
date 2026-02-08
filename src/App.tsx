@@ -7,6 +7,8 @@ import {
   useLayoutEffect,
 } from "react";
 import { Sidebar } from "./components/Sidebar";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ConfirmModal } from "./components/ConfirmModal";
 import { ChatMessage, StreamingMessage } from "./components/ChatMessage";
 import { ChatInput } from "./components/ChatInput";
 import { ThinkingIndicator } from "./components/ThinkingIndicator";
@@ -23,6 +25,7 @@ import { Toast } from "./components/Toast";
 import { EmberParticles } from "./components/EmberParticles";
 import { ThermalBackground } from "./components/ThermalBackground";
 import { useChatStore } from "./stores/chatStore";
+import { useShallow } from "zustand/react/shallow";
 import type { HealthStatus } from "./types";
 import { friendlyError } from "./utils/errorMessages";
 import { resolveDefaultPath } from "./utils/paths";
@@ -85,9 +88,60 @@ function App() {
     dismissToast,
     initEventListeners,
     cleanupEventListeners,
-  } = useChatStore();
+  } = useChatStore(useShallow((s) => ({
+    currentSessionId: s.currentSessionId,
+    messages: s.messages,
+    templates: s.templates,
+    isStreaming: s.isStreaming,
+    streamingContent: s.streamingContent,
+    streamError: s.streamError,
+    searchQuery: s.searchQuery,
+    messagesLoading: s.messagesLoading,
+    documents: s.documents,
+    isGenerating: s.isGenerating,
+    _generatingSessionId: s._generatingSessionId,
+    generateProgress: s.generateProgress,
+    documentsStale: s.documentsStale,
+    showPreview: s.showPreview,
+    forgeTarget: s.forgeTarget,
+    planReadiness: s.planReadiness,
+    healthStatus: s.healthStatus,
+    wizardCompleted: s.wizardCompleted,
+    preferencesLoaded: s.preferencesLoaded,
+    isFirstSession: s.isFirstSession,
+    showSettings: s.showSettings,
+    showHelp: s.showHelp,
+    config: s.config,
+    checkHealth: s.checkHealth,
+    loadPreferences: s.loadPreferences,
+    loadConfig: s.loadConfig,
+    setShowSettings: s.setShowSettings,
+    setShowHelp: s.setShowHelp,
+    loadSessions: s.loadSessions,
+    loadTemplates: s.loadTemplates,
+    createSession: s.createSession,
+    createSessionFromTemplate: s.createSessionFromTemplate,
+    createBranchFromMessage: s.createBranchFromMessage,
+    sendMessage: s.sendMessage,
+    cancelResponse: s.cancelResponse,
+    clearStreamError: s.clearStreamError,
+    retryLastMessage: s.retryLastMessage,
+    analyzePlanReadiness: s.analyzePlanReadiness,
+    generateDocuments: s.generateDocuments,
+    setForgeTarget: s.setForgeTarget,
+    setShowPreview: s.setShowPreview,
+    saveToFolder: s.saveToFolder,
+    openFolder: s.openFolder,
+    markFirstSessionComplete: s.markFirstSessionComplete,
+    toast: s.toast,
+    showToast: s.showToast,
+    dismissToast: s.dismissToast,
+    initEventListeners: s.initEventListeners,
+    cleanupEventListeners: s.cleanupEventListeners,
+  })));
 
   const [inputValue, setInputValue] = useState("");
+  const [confirmForge, setConfirmForge] = useState<{ missing: string[] } | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_MESSAGE_WINDOW);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -228,15 +282,7 @@ function App() {
     }
     const readiness = await analyzePlanReadiness();
     if (readiness && readiness.missing_must_haves.length > 0) {
-      const proceed = window.confirm(
-        `Readiness check found missing must-haves:\n\n- ${readiness.missing_must_haves.join(
-          "\n- ",
-        )}\n\nForge anyway with [TBD] sections?`,
-      );
-      if (!proceed) {
-        return;
-      }
-      await generateDocuments({ target: forgeTarget, force: true });
+      setConfirmForge({ missing: readiness.missing_must_haves });
       return;
     }
     await generateDocuments({ target: forgeTarget, force: false });
@@ -249,6 +295,15 @@ function App() {
     isCurrentSessionGenerating,
     isStreaming,
   ]);
+
+  const handleConfirmForge = useCallback(async () => {
+    setConfirmForge(null);
+    await generateDocuments({ target: forgeTarget, force: true });
+  }, [forgeTarget, generateDocuments]);
+
+  const handleCancelForge = useCallback(() => {
+    setConfirmForge(null);
+  }, []);
 
   const loadOlderMessages = useCallback(() => {
     if (!hasOlderMessages) return;
@@ -439,6 +494,7 @@ function App() {
 
             {/* Document Preview View */}
             {showPreview && hasDocuments ? (
+              <ErrorBoundary>
               <DocumentPreview
                 documents={documents}
                 stale={documentsStale}
@@ -446,8 +502,9 @@ function App() {
                 regenerating={isCurrentSessionGenerating}
                 onSave={handleSaveToFolder}
               />
+              </ErrorBoundary>
             ) : (
-              <>
+              <ErrorBoundary>
                 {/* Chat Messages Area */}
                 <div
                   ref={chatContainerRef}
@@ -580,7 +637,7 @@ function App() {
                   value={inputValue}
                   onChange={setInputValue}
                 />
-              </>
+              </ErrorBoundary>
             )}
           </>
         ) : (
@@ -592,6 +649,21 @@ function App() {
           />
         )}
       </main>
+
+      {/* Confirm Forge Modal */}
+      <ConfirmModal
+        open={confirmForge !== null}
+        title="Missing Must-Haves"
+        message={
+          confirmForge
+            ? `Readiness check found missing must-haves:\n\n- ${confirmForge.missing.join("\n- ")}\n\nForge anyway with [TBD] sections?`
+            : ""
+        }
+        onConfirm={handleConfirmForge}
+        onCancel={handleCancelForge}
+        confirmLabel="Forge Anyway"
+        cancelLabel="Keep Planning"
+      />
 
       {/* Toast Notifications */}
       {toast && (

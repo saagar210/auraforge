@@ -247,6 +247,14 @@ mod tests {
     }
 
     #[test]
+    fn empty_conversation_has_zero_score_and_all_missing() {
+        let report = analyze_plan_readiness(&[]);
+        assert_eq!(report.score, 0);
+        assert_eq!(report.missing_must_haves.len(), 5);
+        assert!(!report.missing_should_haves.is_empty());
+    }
+
+    #[test]
     fn planning_coverage_marks_covered_with_multiple_evidence() {
         let coverage = analyze_planning_coverage(&[
             message(

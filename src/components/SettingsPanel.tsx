@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X, RotateCcw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useChatStore } from "../stores/chatStore";
+import { useShallow } from "zustand/react/shallow";
 import type {
   AppConfig,
   LLMConfig,
@@ -26,7 +27,12 @@ const SECTIONS: { key: Section; label: string }[] = [
 
 export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const { loadConfig, updateConfig, listModels, installedModels } =
-    useChatStore();
+    useChatStore(useShallow((s) => ({
+      loadConfig: s.loadConfig,
+      updateConfig: s.updateConfig,
+      listModels: s.listModels,
+      installedModels: s.installedModels,
+    })));
 
   const [isAdvanced, setIsAdvanced] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("llm");

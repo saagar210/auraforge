@@ -9,6 +9,7 @@ import {
 import { openUrl as shellOpen } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import { useChatStore } from "../stores/chatStore";
+import { useShallow } from "zustand/react/shallow";
 import type { OnboardingStep, DiskSpace } from "../types";
 
 const STEPS: OnboardingStep[] = [
@@ -53,7 +54,20 @@ export function OnboardingWizard() {
     createSession,
     setShowSettings,
     updateSearchConfig,
-  } = useChatStore();
+  } = useChatStore(useShallow((s) => ({
+    wizardStep: s.wizardStep,
+    setWizardStep: s.setWizardStep,
+    completeWizard: s.completeWizard,
+    healthStatus: s.healthStatus,
+    checkHealth: s.checkHealth,
+    modelPullProgress: s.modelPullProgress,
+    isModelPulling: s.isModelPulling,
+    pullModel: s.pullModel,
+    cancelPullModel: s.cancelPullModel,
+    createSession: s.createSession,
+    setShowSettings: s.setShowSettings,
+    updateSearchConfig: s.updateSearchConfig,
+  })));
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [diskSpace, setDiskSpace] = useState<DiskSpace | null>(null);
