@@ -71,7 +71,7 @@ AuraForge is a planning partner that thinks with you, not for you. You describe 
 | **CLAUDE.md** | Project context file optimized for Claude Code. Keep alongside `MODEL_HANDOFF.md` for model-specific execution rules. |
 | **PROMPTS.md** | Phased implementation with complexity indicators, per-phase prerequisites, verification checklists, and cross-references to SPEC.md + CLAUDE.md. |
 | **README.md** | Planning folder orientation — key decisions, known gaps, document guide. |
-| **MODEL_HANDOFF.md** | Target-aware handoff notes for Codex, Claude, Cursor, Gemini, or generic coding agents. |
+| **MODEL_HANDOFF.md** | Target-aware handoff notes for Codex, Claude Code, Cursor, legacy Gemini, or generic coding agents. |
 | **CONVERSATION.md** | Full planning transcript from session data (no LLM needed). Revisit to understand _why_ decisions were made. |
 
 Documents are generated sequentially with cross-referencing — each document receives all previously generated documents as context, ensuring consistency across the entire output.
@@ -105,7 +105,7 @@ Every generation run includes lint and diff artifacts. SpecLint/PromptLint catch
 Create branches from any message to explore alternate planning decisions without losing the main thread. Branch lineage is persisted, and generation/export can run from the selected branch context.
 
 ### Model-Agnostic Export Packs
-`save_to_folder` remains the finish line. Exports include deterministic `manifest.json` metadata (`bytes`, `lines`, `sha256`) for each generated file so any coding model workflow can validate pack integrity.
+`save_to_folder` remains the finish line. Exports include deterministic `manifest.json` metadata (`bytes`, `lines`, `sha256`) for each generated file so any coding model workflow can validate pack integrity. Current manifest schema is `v3` with explicit backward compatibility support for `v2` consumers.
 
 ### Local-First and Private
 All data stays on your machine. Conversations live in a local SQLite database with WAL mode. Config is stored as YAML in `~/.auraforge/`. Network calls are limited to your configured local model runtime and optional web search providers. No telemetry, no cloud sync, and no required paid model APIs.
@@ -274,10 +274,11 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 | Metric | Result |
 |--------|--------|
 | `npm run test` | **23/23 passing** |
-| `cargo test` | **74/74 passing** |
+| `cargo test` | **87 passing, 0 failing, 1 ignored (manual smoke test)** |
 | `cargo clippy -- -D warnings` | **0 warnings** |
 | `npx tsc --noEmit` | **0 errors** |
 | `npm run tauri build` | **Produces macOS + Linux bundles** |
+| GitHub Actions `linux-ci` | **checks + bundle-linux passing on main** |
 | Source lines | **~9,200** across Rust, TypeScript, and CSS |
 | Rust test coverage focus | Config validation, DB operations, search triggers/cache, DuckDuckGo HTML parsing, provider parsing, importer bounds, export manifest integrity, docgen quality scoring |
 
@@ -326,12 +327,19 @@ Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to
 - [x] Linux builds (Windows deferred)
 - [x] Additional local model runtimes (LM Studio/OpenAI-compatible local endpoints)
 - [x] Project templates for common app types
+- [x] Template library expansion (SaaS, API, backend service, CLI, Tauri app, internal IT automation)
+- [x] Export presets and deterministic folder layout (`docs/`, `handoff/`, `context/`, `reports/`) with execution checklist
+- [x] SpecLint + PromptLint with severity-aware generation gating and lint report output
+- [x] Artifact diffing with markdown changelog and JSON diff artifact
+- [x] Repo ingest mode with grounded citations and explicit `[TBD]` markers when evidence is sparse
+- [x] Manifest schema compatibility guardrails (current `v3`, backward-compatible `v2`)
 - [x] Import existing codebases for refactoring plans
 - [x] Conversation branching — explore alternate decisions without losing the main thread
 - [x] Security hardening — SQL identifier validation, URL scheme restrictions, config file permissions, input length limits, symlink traversal prevention
 - [x] React quality pass — error boundaries, confirm modals (no more `window.confirm`), `useShallow` selectors to prevent unnecessary re-renders, animation pausing on background tabs
-- [x] Bundle optimization — PrismLight with 13 registered languages instead of full Prism bundle
-- [x] Test coverage expansion — 74 Rust tests, 23 frontend tests across 6 test files
+- [x] Bundle optimization — lazy loading for heavy panels and syntax highlighting chunking
+- [x] CI hardening — invariant/documentation consistency checks in `linux-ci`
+- [x] Test coverage expansion — 87 Rust tests (+1 ignored manual smoke), 23 frontend tests across 6 test files
 
 ### Deferred by Scope
 
