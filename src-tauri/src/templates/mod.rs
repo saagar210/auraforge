@@ -6,6 +6,8 @@ const TEMPLATE_FILES: &[&str] = &[
     include_str!("../../templates/tauri-desktop-app.json"),
     include_str!("../../templates/cli-tool.json"),
     include_str!("../../templates/api-service.json"),
+    include_str!("../../templates/backend-service.json"),
+    include_str!("../../templates/internal-it-automation.json"),
 ];
 
 pub fn list_templates() -> Result<Vec<PlanningTemplate>, AppError> {

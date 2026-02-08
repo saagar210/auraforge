@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
-use crate::types::CodebaseImportSummary;
+use crate::types::{CodebaseImportSummary, RepoCitation};
 
 const MAX_FILES_SCANNED: usize = 600;
 const MAX_FILE_BYTES: u64 = 64 * 1024;
@@ -12,6 +12,14 @@ const MAX_TOTAL_BYTES: u64 = 6 * 1024 * 1024;
 const MAX_DEPTH: usize = 8;
 const MAX_SNIPPETS: usize = 20;
 const MAX_SNIPPET_CHARS: usize = 280;
+
+#[derive(Debug, Clone)]
+struct SnippetEvidence {
+    path: String,
+    line_start: Option<usize>,
+    line_end: Option<usize>,
+    snippet: String,
+}
 
 const SKIP_DIRS: &[&str] = &[
     ".git",
@@ -65,7 +73,7 @@ pub fn summarize_codebase(root_path: &str) -> Result<CodebaseImportSummary, AppE
     let mut total_bytes_read = 0u64;
     let mut extension_counts: HashMap<String, usize> = HashMap::new();
     let mut key_files = Vec::new();
-    let mut snippets = Vec::new();
+    let mut snippets = Vec::<SnippetEvidence>::new();
 
     while let Some((dir, depth)) = stack.pop() {
         if depth > MAX_DEPTH
@@ -150,14 +158,17 @@ pub fn summarize_codebase(root_path: &str) -> Result<CodebaseImportSummary, AppE
             if snippets.len() < MAX_SNIPPETS
                 && (is_key_file(file_name) || is_source_extension(&ext))
             {
-                let snippet = String::from_utf8_lossy(&bytes)
-                    .lines()
-                    .take(6)
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                let text = String::from_utf8_lossy(&bytes);
+                let lines = text.lines().take(6).collect::<Vec<_>>();
+                let snippet = lines.join(" ");
                 let snippet = snippet.chars().take(MAX_SNIPPET_CHARS).collect::<String>();
                 if !snippet.trim().is_empty() {
-                    snippets.push(format!("{}: {}", relative, snippet.trim()));
+                    snippets.push(SnippetEvidence {
+                        path: relative.clone(),
+                        line_start: Some(1),
+                        line_end: Some(lines.len()),
+                        snippet: snippet.trim().to_string(),
+                    });
                 }
             }
         }
@@ -173,6 +184,21 @@ pub fn summarize_codebase(root_path: &str) -> Result<CodebaseImportSummary, AppE
         &key_files,
         &snippets,
     );
+    let citations = snippets
+        .iter()
+        .take(10)
+        .map(|snippet| RepoCitation {
+            path: snippet.path.clone(),
+            line_start: snippet.line_start,
+            line_end: snippet.line_end,
+            snippet: snippet.snippet.clone(),
+        })
+        .collect::<Vec<_>>();
+    let architecture_summary_markdown =
+        build_architecture_summary_markdown(&detected_stacks, &key_files, &citations);
+    let risks_gaps_markdown = build_risks_gaps_markdown(&detected_stacks, &key_files, &citations);
+    let phased_plan_markdown = build_phased_plan_markdown(&detected_stacks, &citations);
+    let verification_plan_markdown = build_verification_plan_markdown(&citations);
 
     Ok(CodebaseImportSummary {
         root_path: canonical_root.to_string_lossy().to_string(),
@@ -182,6 +208,11 @@ pub fn summarize_codebase(root_path: &str) -> Result<CodebaseImportSummary, AppE
         detected_stacks,
         key_files,
         summary_markdown,
+        architecture_summary_markdown,
+        risks_gaps_markdown,
+        phased_plan_markdown,
+        verification_plan_markdown,
+        citations,
     })
 }
 
@@ -269,7 +300,7 @@ fn build_summary_markdown(
     total_bytes_read: u64,
     detected_stacks: &[String],
     key_files: &[String],
-    snippets: &[String],
+    snippets: &[SnippetEvidence],
 ) -> String {
     let mut summary = String::new();
 
@@ -297,7 +328,13 @@ fn build_summary_markdown(
     if !snippets.is_empty() {
         summary.push_str("\n### Representative snippets\n");
         for snippet in snippets.iter().take(10) {
-            summary.push_str(&format!("- {}\n", snippet));
+            summary.push_str(&format!(
+                "- `{}` (L{}-L{}): {}\n",
+                snippet.path,
+                snippet.line_start.unwrap_or(0),
+                snippet.line_end.unwrap_or(0),
+                snippet.snippet
+            ));
         }
     }
 
@@ -306,6 +343,99 @@ fn build_summary_markdown(
     );
 
     summary
+}
+
+fn build_architecture_summary_markdown(
+    detected_stacks: &[String],
+    key_files: &[String],
+    citations: &[RepoCitation],
+) -> String {
+    let mut out = String::from("## Architecture Summary (Grounded)\n");
+    out.push_str("\n### Detected ecosystem\n");
+    for stack in detected_stacks {
+        out.push_str(&format!("- {}\n", stack));
+    }
+
+    out.push_str("\n### Structural evidence\n");
+    if key_files.is_empty() {
+        out.push_str("- [TBD] No key files detected. Need a deeper scan target.\n");
+    } else {
+        for file in key_files.iter().take(12) {
+            out.push_str(&format!("- `{}`\n", file));
+        }
+    }
+
+    out.push_str("\n### Citation samples\n");
+    if citations.is_empty() {
+        out.push_str("- [TBD] No readable source snippets were captured.\n");
+    } else {
+        for citation in citations.iter().take(6) {
+            out.push_str(&format!(
+                "- `{}` (L{}-L{}): {}\n",
+                citation.path,
+                citation.line_start.unwrap_or(0),
+                citation.line_end.unwrap_or(0),
+                citation.snippet
+            ));
+        }
+    }
+
+    out
+}
+
+fn build_risks_gaps_markdown(
+    detected_stacks: &[String],
+    key_files: &[String],
+    citations: &[RepoCitation],
+) -> String {
+    let mut out = String::from("## Risks / Gaps Checklist (Grounded)\n");
+    out.push_str(
+        "\n- [ ] Missing test strategy evidence in repo files (confirm with maintainers).\n",
+    );
+    out.push_str("- [ ] Verify CI parity with local commands before major refactor.\n");
+    if !detected_stacks
+        .iter()
+        .any(|stack| stack.contains("Containerized"))
+    {
+        out.push_str("- [ ] [TBD] Deployment topology unclear (no Docker evidence found).\n");
+    }
+    if !key_files.iter().any(|path| path.ends_with("README.md")) {
+        out.push_str("- [ ] [TBD] Repository orientation docs not found at root.\n");
+    }
+    if citations.is_empty() {
+        out.push_str("- [ ] [TBD] Need additional file evidence for risk scoring confidence.\n");
+    }
+    out
+}
+
+fn build_phased_plan_markdown(detected_stacks: &[String], citations: &[RepoCitation]) -> String {
+    let mut out = String::from("## Phased Implementation Plan (Grounded)\n");
+    out.push_str("\n1. Foundation: establish baseline checks and architecture invariants from cited files.\n");
+    out.push_str(
+        "2. Iteration 1: stabilize core runtime + interfaces where citations show highest churn.\n",
+    );
+    out.push_str(
+        "3. Iteration 2: address risk hotspots and test gaps identified in cited evidence.\n",
+    );
+    out.push_str("4. Polish: run full verification, update docs, and lock release gates.\n");
+
+    if detected_stacks.is_empty() || citations.is_empty() {
+        out.push_str(
+            "\n[TBD] Evidence coverage is limited. Expand import scope before finalizing effort estimates.\n",
+        );
+    }
+    out
+}
+
+fn build_verification_plan_markdown(citations: &[RepoCitation]) -> String {
+    let mut out = String::from("## Verification Plan (Grounded)\n");
+    out.push_str("\n- [ ] Run repo-defined typecheck, tests, and build gates.\n");
+    out.push_str("- [ ] Validate changes against cited files to prevent contract regressions.\n");
+    out.push_str("- [ ] Re-run import and compare new summary against prior citations.\n");
+    if citations.is_empty() {
+        out.push_str("- [ ] [TBD] Add citation evidence before final sign-off.\n");
+    }
+    out
 }
 
 fn read_file_prefix(path: &Path, max_bytes: usize) -> std::io::Result<Vec<u8>> {
@@ -360,10 +490,149 @@ mod tests {
         let summary = summarize_codebase(root.to_str().unwrap()).unwrap();
 
         // The real file should be included but the symlink target should not
-        assert!(summary.files_scanned >= 1, "should scan at least the real file");
+        assert!(
+            summary.files_scanned >= 1,
+            "should scan at least the real file"
+        );
         assert!(
             !summary.summary_markdown.contains("TOP SECRET DATA"),
             "symlink target content should not appear in summary"
+        );
+    }
+
+    #[test]
+    fn summarize_codebase_emits_grounded_sections_with_citations() {
+        let dir = tempdir().expect("temp dir should be created");
+        let root = dir.path();
+
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"fixture","version":"1.0.0"}"#,
+        )
+        .expect("package file should be written");
+        fs::create_dir_all(root.join("src")).expect("src directory should be created");
+        fs::write(
+            root.join("src").join("main.ts"),
+            "export function run() { return 'ok'; }",
+        )
+        .expect("source file should be written");
+
+        let summary = summarize_codebase(root.to_str().expect("path should be valid utf-8"))
+            .expect("summary should succeed");
+        assert!(
+            !summary.citations.is_empty(),
+            "citations should be present for grounded summaries"
+        );
+        assert!(
+            summary
+                .architecture_summary_markdown
+                .contains("## Architecture Summary (Grounded)"),
+            "architecture section should be generated"
+        );
+        assert!(
+            summary
+                .architecture_summary_markdown
+                .contains("package.json"),
+            "key file evidence should be included"
+        );
+        assert!(
+            summary
+                .risks_gaps_markdown
+                .contains("Risks / Gaps Checklist (Grounded)"),
+            "risk checklist should be generated"
+        );
+        assert!(
+            summary.phased_plan_markdown.contains("1. Foundation"),
+            "phased plan should include foundation step"
+        );
+        assert!(
+            summary
+                .verification_plan_markdown
+                .contains("Run repo-defined typecheck, tests, and build gates"),
+            "verification section should include canonical validation guidance"
+        );
+    }
+
+    #[test]
+    fn summarize_codebase_marks_tbd_when_evidence_is_sparse() {
+        let dir = tempdir().expect("temp dir should be created");
+        let summary = summarize_codebase(dir.path().to_str().expect("path should be valid utf-8"))
+            .expect("summary should succeed");
+        assert!(
+            summary.architecture_summary_markdown.contains("[TBD]"),
+            "architecture section should mark missing evidence"
+        );
+        assert!(
+            summary.risks_gaps_markdown.contains("[TBD]"),
+            "risk section should mark uncertain findings"
+        );
+        assert!(
+            summary.phased_plan_markdown.contains("[TBD]"),
+            "phase plan should mark limited evidence"
+        );
+        assert!(
+            summary.verification_plan_markdown.contains("[TBD]"),
+            "verification plan should mark missing evidence"
+        );
+    }
+
+    #[test]
+    #[ignore = "manual smoke test (set AURAFORGE_INGEST_SMOKE_REPO to run)"]
+    fn smoke_import_real_repo_from_env() {
+        let repo_path = std::env::var("AURAFORGE_INGEST_SMOKE_REPO")
+            .expect("AURAFORGE_INGEST_SMOKE_REPO must be set for smoke tests");
+        let summary = summarize_codebase(&repo_path).expect("smoke import should succeed");
+
+        assert!(summary.files_scanned > 0, "smoke import should scan files");
+        assert!(
+            summary.files_included > 0,
+            "smoke import should include files"
+        );
+        assert!(
+            !summary.architecture_summary_markdown.trim().is_empty(),
+            "architecture summary should be present"
+        );
+        assert!(
+            !summary.risks_gaps_markdown.trim().is_empty(),
+            "risk checklist should be present"
+        );
+        assert!(
+            !summary.phased_plan_markdown.trim().is_empty(),
+            "phased plan should be present"
+        );
+        assert!(
+            !summary.verification_plan_markdown.trim().is_empty(),
+            "verification plan should be present"
+        );
+
+        let sample_citations = summary
+            .citations
+            .iter()
+            .take(3)
+            .map(|citation| {
+                format!(
+                    "{}:{}-{}",
+                    citation.path,
+                    citation.line_start.unwrap_or(0),
+                    citation.line_end.unwrap_or(0)
+                )
+            })
+            .collect::<Vec<_>>();
+
+        println!("SMOKE_REPO={}", summary.root_path);
+        println!("SMOKE_FILES_SCANNED={}", summary.files_scanned);
+        println!("SMOKE_FILES_INCLUDED={}", summary.files_included);
+        println!("SMOKE_BYTES_READ={}", summary.total_bytes_read);
+        println!("SMOKE_STACKS={}", summary.detected_stacks.join(" | "));
+        println!("SMOKE_KEY_FILES={}", summary.key_files.len());
+        println!("SMOKE_CITATIONS={}", summary.citations.len());
+        println!(
+            "SMOKE_CITATION_SAMPLE={}",
+            if sample_citations.is_empty() {
+                "none".to_string()
+            } else {
+                sample_citations.join(", ")
+            }
         );
     }
 }

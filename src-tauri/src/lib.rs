@@ -1,9 +1,11 @@
+mod artifact_diff;
 mod commands;
 mod config;
 mod db;
 mod docgen;
 mod error;
 mod importer;
+mod lint;
 mod llm;
 mod search;
 mod state;

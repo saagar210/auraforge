@@ -334,6 +334,18 @@ export const useChatStore = create<ChatState>((set, get) => {
 
   createSessionFromTemplate: async (templateId: string) => {
     try {
+      const template = get().templates.find((item) => item.id === templateId);
+      const recommendedTarget = template?.recommended_target;
+      const validTargets: ForgeTarget[] = [
+        "generic",
+        "codex",
+        "claude",
+        "cursor",
+        "gemini",
+      ];
+      const resolvedTarget = validTargets.includes(recommendedTarget as ForgeTarget)
+        ? (recommendedTarget as ForgeTarget)
+        : get().forgeTarget;
       const session = await invoke<Session>("create_session_from_template", {
         request: { template_id: templateId, name: null },
       });
@@ -356,6 +368,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         generationConfidence: null,
         generationMetadata: null,
         latestImportSummary: null,
+        forgeTarget: resolvedTarget,
       }));
 
       const messages = await invoke<Message[]>("get_messages", {

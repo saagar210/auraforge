@@ -28,6 +28,9 @@ Expected:
 - `cargo fmt --check`
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo test`
+- `cargo test commands::tests::prepare_export_documents_backfills_required_reports`
+- `cargo test importer::tests::summarize_codebase_emits_grounded_sections_with_citations`
+- `AURAFORGE_INGEST_SMOKE_REPO=/path/to/other/repo cargo test importer::tests::smoke_import_real_repo_from_env -- --ignored --nocapture` (manual release smoke)
 - `cargo build`
 
 Expected:
@@ -59,8 +62,11 @@ Validate in packaged app:
 3. Cancel response works and does not leave stuck spinner.
 4. Forge documents succeeds.
 5. Save to folder succeeds and writes:
-   - planning docs
+   - `docs/`, `handoff/`, `context/`, and `reports/` folders
    - `manifest.json`
+   - `reports/LINT_REPORT.md`
+   - `reports/ARTIFACT_CHANGELOG.md`
+   - `reports/ARTIFACT_DIFF.json`
 6. Settings persist across restart.
 7. Search failure paths do not block responses.
 
@@ -79,6 +85,7 @@ Validate in packaged app:
   - verification commands and outcomes
   - remaining risks
 - Update `IMPLEMENTATION_MAP.md` status blocks.
+- Add release evidence to `docs/release-notes-YYYY-MM-DD.md`.
 - Confirm `RUNBOOK.md` still matches operational behavior and troubleshooting flows.
 
 ## 8) Final CI Gate

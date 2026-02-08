@@ -10,11 +10,10 @@ interface ForgeButtonProps {
 }
 
 const TARGET_OPTIONS: Array<{ value: ForgeTarget; label: string }> = [
-  { value: "generic", label: "Any model" },
+  { value: "generic", label: "Generic Agent" },
   { value: "codex", label: "Codex" },
-  { value: "claude", label: "Claude" },
+  { value: "claude", label: "Claude Code" },
   { value: "cursor", label: "Cursor" },
-  { value: "gemini", label: "Gemini" },
 ];
 
 export function ForgeButton({

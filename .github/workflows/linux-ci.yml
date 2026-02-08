@@ -53,6 +53,12 @@ jobs:
           cargo test
           cargo build
 
+      - name: Documentation and invariant references
+        run: |
+          rg -n "prepare_export_documents_backfills_required_reports|summarize_codebase_emits_grounded_sections_with_citations" src-tauri/src
+          rg -n "ARTIFACT_DIFF.json" README.md RUNBOOK.md RELEASE_CHECKLIST.md
+          test -f docs/next-phases-plan.md
+
   bundle-linux:
     runs-on: ubuntu-latest
     needs: checks

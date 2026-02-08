@@ -1,0 +1,21 @@
+{
+  "id": "backend-service",
+  "name": "Backend Service",
+  "description": "Service-oriented backend with contracts, storage boundaries, and operational verification.",
+  "target_stack": "Backend API + persistence + observability",
+  "version": 1,
+  "recommended_target": "codex",
+  "required_sections": [
+    "overview",
+    "interface contract",
+    "data model",
+    "acceptance criteria",
+    "verification"
+  ],
+  "verification_focus": [
+    "contract tests",
+    "error handling",
+    "migration safety"
+  ],
+  "seed_prompt": "Let's design your backend service with contract-first precision. Start by listing the top 3 operations and what each one must guarantee for correctness and reliability."
+}

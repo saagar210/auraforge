@@ -88,10 +88,32 @@ impl Database {
                 target TEXT NOT NULL,
                 provider TEXT NOT NULL,
                 model TEXT NOT NULL,
+                run_id TEXT,
                 quality_json TEXT,
                 confidence_json TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS generation_runs (
+                run_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                target TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                input_fingerprint TEXT NOT NULL,
+                lint_summary_json TEXT,
+                diff_summary_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS generation_run_artifacts (
+                run_id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                bytes INTEGER NOT NULL,
+                lines INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                PRIMARY KEY (run_id, filename),
+                FOREIGN KEY (run_id) REFERENCES generation_runs(run_id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS session_branches (
                 branch_session_id TEXT PRIMARY KEY,
@@ -109,10 +131,12 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_documents_session ON documents(session_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_generation_metadata_created ON generation_metadata(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_generation_runs_session_created ON generation_runs(session_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_branch_root ON session_branches(root_session_id);
             ",
         )?;
         Self::ensure_column_exists(&conn, "generation_metadata", "confidence_json", "TEXT")?;
+        Self::ensure_column_exists(&conn, "generation_metadata", "run_id", "TEXT")?;
         Ok(())
     }
 
@@ -470,23 +494,26 @@ impl Database {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn upsert_generation_metadata(
         &self,
         session_id: &str,
         target: &str,
         provider: &str,
         model: &str,
+        run_id: Option<&str>,
         quality_json: Option<&str>,
         confidence_json: Option<&str>,
     ) -> Result<(), rusqlite::Error> {
         let conn = self.conn();
         conn.execute(
-            "INSERT INTO generation_metadata (session_id, target, provider, model, quality_json, confidence_json, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP)
+            "INSERT INTO generation_metadata (session_id, target, provider, model, run_id, quality_json, confidence_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, CURRENT_TIMESTAMP)
              ON CONFLICT(session_id) DO UPDATE SET
                 target=excluded.target,
                 provider=excluded.provider,
                 model=excluded.model,
+                run_id=excluded.run_id,
                 quality_json=excluded.quality_json,
                 confidence_json=excluded.confidence_json,
                 created_at=CURRENT_TIMESTAMP",
@@ -495,6 +522,7 @@ impl Database {
                 target,
                 provider,
                 model,
+                run_id,
                 quality_json,
                 confidence_json
             ],
@@ -508,7 +536,7 @@ impl Database {
     ) -> Result<Option<GenerationMetadata>, rusqlite::Error> {
         let conn = self.conn();
         match conn.query_row(
-            "SELECT session_id, target, provider, model, quality_json, confidence_json, created_at
+            "SELECT session_id, target, provider, model, run_id, quality_json, confidence_json, created_at
              FROM generation_metadata WHERE session_id = ?1",
             params![session_id],
             |row| {
@@ -517,9 +545,10 @@ impl Database {
                     target: row.get(1)?,
                     provider: row.get(2)?,
                     model: row.get(3)?,
-                    quality_json: row.get(4)?,
-                    confidence_json: row.get(5)?,
-                    created_at: row.get(6)?,
+                    run_id: row.get(4)?,
+                    quality_json: row.get(5)?,
+                    confidence_json: row.get(6)?,
+                    created_at: row.get(7)?,
                 })
             },
         ) {
@@ -527,6 +556,72 @@ impl Database {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(err) => Err(err),
         }
+    }
+
+    pub fn insert_generation_run(
+        &self,
+        run: &GenerationRunRecord,
+        artifacts: &[GenerationRunArtifact],
+    ) -> Result<(), rusqlite::Error> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO generation_runs (run_id, session_id, target, provider, model, input_fingerprint, lint_summary_json, diff_summary_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, CURRENT_TIMESTAMP)",
+            params![
+                run.run_id,
+                run.session_id,
+                run.target,
+                run.provider,
+                run.model,
+                run.input_fingerprint,
+                run.lint_summary_json,
+                run.diff_summary_json
+            ],
+        )?;
+
+        for artifact in artifacts {
+            tx.execute(
+                "INSERT INTO generation_run_artifacts (run_id, filename, bytes, lines, sha256)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    artifact.run_id,
+                    artifact.filename,
+                    artifact.bytes as i64,
+                    artifact.lines as i64,
+                    artifact.sha256
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn get_generation_run_artifacts(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<GenerationRunArtifact>, rusqlite::Error> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT run_id, filename, bytes, lines, sha256
+             FROM generation_run_artifacts
+             WHERE run_id = ?1
+             ORDER BY filename ASC",
+        )?;
+
+        let rows = stmt.query_map(params![run_id], |row| {
+            Ok(GenerationRunArtifact {
+                run_id: row.get(0)?,
+                filename: row.get(1)?,
+                bytes: row.get::<_, i64>(2)? as usize,
+                lines: row.get::<_, i64>(3)? as usize,
+                sha256: row.get(4)?,
+            })
+        })?;
+
+        rows.collect()
     }
 
     // ---- Preferences ----
@@ -910,6 +1005,7 @@ mod tests {
             "generic",
             "ollama",
             "qwen3-coder",
+            Some("run-1"),
             Some(r#"{"score":75}"#),
             Some(r#"{"score":82}"#),
         )
@@ -919,16 +1015,65 @@ mod tests {
         assert_eq!(meta.target, "generic");
         assert_eq!(meta.provider, "ollama");
         assert_eq!(meta.model, "qwen3-coder");
+        assert_eq!(meta.run_id.as_deref(), Some("run-1"));
         assert_eq!(meta.confidence_json.as_deref(), Some(r#"{"score":82}"#));
 
-        db.upsert_generation_metadata(&session.id, "codex", "openai", "gpt-5", None, None)
-            .unwrap();
+        db.upsert_generation_metadata(
+            &session.id,
+            "codex",
+            "openai",
+            "gpt-5",
+            Some("run-2"),
+            None,
+            None,
+        )
+        .unwrap();
         let updated = db.get_generation_metadata(&session.id).unwrap().unwrap();
         assert_eq!(updated.target, "codex");
         assert_eq!(updated.provider, "openai");
         assert_eq!(updated.model, "gpt-5");
+        assert_eq!(updated.run_id.as_deref(), Some("run-2"));
         assert!(updated.quality_json.is_none());
         assert!(updated.confidence_json.is_none());
+    }
+
+    #[test]
+    fn insert_generation_run_and_read_artifacts() {
+        let db = test_db();
+        let session = db.create_session(Some("Run Session")).unwrap();
+        let run = GenerationRunRecord {
+            run_id: "run-test-1".to_string(),
+            session_id: session.id.clone(),
+            target: "codex".to_string(),
+            provider: "ollama".to_string(),
+            model: "qwen3-coder".to_string(),
+            input_fingerprint: "abc123".to_string(),
+            lint_summary_json: Some(r#"{"critical":0}"#.to_string()),
+            diff_summary_json: None,
+            created_at: "ignored".to_string(),
+        };
+        let artifacts = vec![
+            GenerationRunArtifact {
+                run_id: run.run_id.clone(),
+                filename: "SPEC.md".to_string(),
+                bytes: 120,
+                lines: 8,
+                sha256: "hash1".to_string(),
+            },
+            GenerationRunArtifact {
+                run_id: run.run_id.clone(),
+                filename: "PROMPTS.md".to_string(),
+                bytes: 200,
+                lines: 14,
+                sha256: "hash2".to_string(),
+            },
+        ];
+
+        db.insert_generation_run(&run, &artifacts).unwrap();
+        let read = db.get_generation_run_artifacts(&run.run_id).unwrap();
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].filename, "PROMPTS.md");
+        assert_eq!(read[1].filename, "SPEC.md");
     }
 
     #[test]

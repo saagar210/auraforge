@@ -4,5 +4,17 @@
   "description": "Multi-tenant web product with auth, billing, and admin workflows.",
   "target_stack": "React + API + relational DB",
   "version": 1,
+  "recommended_target": "cursor",
+  "required_sections": [
+    "tenant model",
+    "billing boundaries",
+    "acceptance criteria",
+    "verification"
+  ],
+  "verification_focus": [
+    "auth flow",
+    "billing edge cases",
+    "data isolation"
+  ],
   "seed_prompt": "Let's plan your SaaS app with clarity from day one. We should define: target users, core workflow, pricing/billing boundaries, and your v1 scope. Start by describing the single most important user outcome this SaaS must deliver."
 }

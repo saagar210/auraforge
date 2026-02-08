@@ -5,6 +5,8 @@ import {
   useCallback,
   useMemo,
   useLayoutEffect,
+  lazy,
+  Suspense,
 } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -15,11 +17,8 @@ import { ThinkingIndicator } from "./components/ThinkingIndicator";
 import { SearchIndicator } from "./components/SearchIndicator";
 import { ForgeButton } from "./components/ForgeButton";
 import { ForgingProgress } from "./components/ForgingProgress";
-import { DocumentPreview } from "./components/DocumentPreview";
 import { EmptyState } from "./components/EmptyState";
 import { OnboardingWizard } from "./components/OnboardingWizard";
-import { SettingsPanel } from "./components/SettingsPanel";
-import { HelpPanel } from "./components/HelpPanel";
 import { InfoTooltip } from "./components/InfoTooltip";
 import { Toast } from "./components/Toast";
 import { EmberParticles } from "./components/EmberParticles";
@@ -31,6 +30,16 @@ import { friendlyError } from "./utils/errorMessages";
 import { resolveDefaultPath } from "./utils/paths";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, X, FileText, MessageSquare } from "lucide-react";
+
+const LazyDocumentPreview = lazy(async () => ({
+  default: (await import("./components/DocumentPreview")).DocumentPreview,
+}));
+const LazySettingsPanel = lazy(async () => ({
+  default: (await import("./components/SettingsPanel")).SettingsPanel,
+}));
+const LazyHelpPanel = lazy(async () => ({
+  default: (await import("./components/HelpPanel")).HelpPanel,
+}));
 
 function App() {
   const INITIAL_MESSAGE_WINDOW = 120;
@@ -495,13 +504,21 @@ function App() {
             {/* Document Preview View */}
             {showPreview && hasDocuments ? (
               <ErrorBoundary>
-              <DocumentPreview
-                documents={documents}
-                stale={documentsStale}
-                onRegenerate={() => handleForgePlan({ ignoreThreshold: true })}
-                regenerating={isCurrentSessionGenerating}
-                onSave={handleSaveToFolder}
-              />
+                <Suspense
+                  fallback={
+                    <div className="flex-1 flex items-center justify-center text-sm text-text-muted">
+                      Loading documents...
+                    </div>
+                  }
+                >
+                  <LazyDocumentPreview
+                    documents={documents}
+                    stale={documentsStale}
+                    onRegenerate={() => handleForgePlan({ ignoreThreshold: true })}
+                    regenerating={isCurrentSessionGenerating}
+                    onSave={handleSaveToFolder}
+                  />
+                </Suspense>
               </ErrorBoundary>
             ) : (
               <ErrorBoundary>
@@ -683,13 +700,17 @@ function App() {
       )}
 
       {/* Help Panel */}
-      <HelpPanel open={showHelp} onClose={() => setShowHelp(false)} />
+      <Suspense fallback={null}>
+        <LazyHelpPanel open={showHelp} onClose={() => setShowHelp(false)} />
+      </Suspense>
 
       {/* Settings Panel */}
-      <SettingsPanel
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-      />
+      <Suspense fallback={null}>
+        <LazySettingsPanel
+          open={showSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      </Suspense>
 
       {/* Onboarding Wizard */}
       {showOnboarding && healthStatus && <OnboardingWizard />}

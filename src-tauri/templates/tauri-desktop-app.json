@@ -4,5 +4,17 @@
   "description": "Cross-platform desktop app with local file access and Rust command boundaries.",
   "target_stack": "Tauri + React + Rust",
   "version": 1,
+  "recommended_target": "codex",
+  "required_sections": [
+    "ipc contracts",
+    "filesystem boundaries",
+    "error handling",
+    "verification"
+  ],
+  "verification_focus": [
+    "command integration",
+    "offline behavior",
+    "packaging checks"
+  ],
   "seed_prompt": "Great, you're building a Tauri desktop app. Let's lock the core local workflow first: what the user does from launch to success, what data stays local, and where filesystem reads/writes happen. Describe the primary workflow in 3-5 concrete steps."
 }

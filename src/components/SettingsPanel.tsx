@@ -58,6 +58,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [includeConversation, setIncludeConversation] = useState(true);
   const [defaultSavePath, setDefaultSavePath] = useState("~/Projects");
   const [defaultTarget, setDefaultTarget] = useState<ForgeTarget>("generic");
+  const [lintMode, setLintMode] = useState<OutputConfig["lint_mode"]>("fail_on_critical");
   const [uiTheme, setUiTheme] = useState<UIConfig["theme"]>("dark");
 
   useEffect(() => {
@@ -84,6 +85,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         setIncludeConversation(config.output.include_conversation);
         setDefaultSavePath(config.output.default_save_path);
         setDefaultTarget(config.output.default_target);
+        setLintMode(config.output.lint_mode ?? "fail_on_critical");
         setUiTheme(config.ui.theme);
       });
       // Load installed models for dropdown
@@ -130,6 +132,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       include_conversation: includeConversation,
       default_save_path: defaultSavePath,
       default_target: defaultTarget,
+      lint_mode: lintMode,
     };
 
     const ui: UIConfig = {
@@ -326,11 +329,25 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   onChange={(e) => setDefaultTarget(e.target.value as ForgeTarget)}
                   className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
                 >
-                  <option value="generic">Any model</option>
+                  <option value="generic">Generic Agent</option>
                   <option value="codex">Codex</option>
-                  <option value="claude">Claude</option>
+                  <option value="claude">Claude Code</option>
                   <option value="cursor">Cursor</option>
-                  <option value="gemini">Gemini</option>
+                  <option value="gemini">Gemini (legacy)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm text-text-secondary mb-1.5">
+                  Lint Enforcement
+                </label>
+                <select
+                  value={lintMode}
+                  onChange={(e) => setLintMode(e.target.value as OutputConfig["lint_mode"])}
+                  className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                >
+                  <option value="fail_on_critical">Fail on critical issues</option>
+                  <option value="warn">Warn only</option>
                 </select>
               </div>
 
@@ -613,11 +630,25 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                       onChange={(e) => setDefaultTarget(e.target.value as ForgeTarget)}
                       className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
                     >
-                      <option value="generic">Any model</option>
+                      <option value="generic">Generic Agent</option>
                       <option value="codex">Codex</option>
-                      <option value="claude">Claude</option>
+                      <option value="claude">Claude Code</option>
                       <option value="cursor">Cursor</option>
-                      <option value="gemini">Gemini</option>
+                      <option value="gemini">Gemini (legacy)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1.5">
+                      Lint Enforcement
+                    </label>
+                    <select
+                      value={lintMode}
+                      onChange={(e) => setLintMode(e.target.value as OutputConfig["lint_mode"])}
+                      className="w-full px-3 py-2 bg-surface border border-border-default rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-glow focus:shadow-[0_0_0_3px_rgba(232,160,69,0.15)] transition-colors"
+                    >
+                      <option value="fail_on_critical">Fail on critical issues</option>
+                      <option value="warn">Warn only</option>
                     </select>
                   </div>
                 </div>

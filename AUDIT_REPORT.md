@@ -183,3 +183,30 @@ Implemented smallest safe fixes first (highest severity first), each in an isola
 1. Windows-specific config replacement semantics remain deferred (platform out of active scope).
 2. External PM integrations (GitHub/Linear/Jira/Notion sync) remain intentionally out of scope.
 3. UI-level E2E race coverage is still thinner than store-level coverage, though core race paths are now tested.
+
+## Update: Next-Phase Follow-up Closure (2026-02-08)
+
+### Completed
+- Added export-manifest schema compatibility assertions (current schema + backward compatibility coverage).
+- Optimized CI by removing redundant targeted test reruns while preserving invariant checks through explicit fast-reference validation.
+- Added and executed an external manual ingest smoke test against `/Users/d/Projects/MemoryKernel`.
+- Published smoke evidence and release notes in `docs/release-notes-2026-02-08.md`.
+
+### External Ingest Smoke Evidence
+- `SMOKE_FILES_SCANNED=178`
+- `SMOKE_FILES_INCLUDED=178`
+- `SMOKE_BYTES_READ=1084918`
+- `SMOKE_STACKS=Rust`
+- `SMOKE_KEY_FILES=22`
+- `SMOKE_CITATIONS=10`
+- Citation sample: `Cargo.toml:1-6`, `README.md:1-6`, `components/outcome-memory/Cargo.toml:1-6`
+
+### Verification (Closure Pass)
+- `npx tsc --noEmit` -> pass
+- `npm run test -- --run` -> pass
+- `npm run build` -> pass
+- `cargo fmt --check` -> pass
+- `cargo clippy --all-targets --all-features -- -D warnings` -> pass
+- `cargo test` -> pass
+- `cargo build` -> pass
+- `npm run tauri build` -> pass

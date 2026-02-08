@@ -116,6 +116,22 @@ export function HelpPanel({ open, onClose }: HelpPanelProps) {
                       Full chat history export
                     </td>
                   </tr>
+                  <tr>
+                    <td className="py-1.5 pr-3 font-mono text-accent-glow whitespace-nowrap">
+                      LINT_REPORT.md
+                    </td>
+                    <td className="py-1.5 text-text-muted">
+                      SpecLint + PromptLint findings and severity summary
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 pr-3 font-mono text-accent-glow whitespace-nowrap">
+                      ARTIFACT_CHANGELOG.md
+                    </td>
+                    <td className="py-1.5 text-text-muted">
+                      Human-readable diff from the previous generation run
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>

@@ -96,7 +96,10 @@ Sequential generation in dependency order: `SPEC` -> `CLAUDE` -> `PROMPTS` -> `R
 Before generation, AuraForge computes planning coverage across must-have and should-have topics, then records quality/confidence metadata. If must-haves are missing, the UI requires explicit confirmation before forcing generation with `[TBD]` markers.
 
 ### Template-Based Starts and Codebase Import
-You can start from built-in planning templates (SaaS web app, API service, CLI tool, Tauri desktop app) and import an existing local codebase for grounded refactor planning. Import runs locally with bounded reads and byte caps to keep the app responsive.
+You can start from built-in planning templates (SaaS web app, API service, backend service, CLI tool, Tauri desktop app, internal IT automation) and import an existing local codebase for grounded refactor planning. Import runs locally with bounded reads and byte caps to keep the app responsive.
+
+### SpecLint + PromptLint and Artifact Diffing
+Every generation run includes lint and diff artifacts. SpecLint/PromptLint catch unresolved `[TBD]` markers, missing acceptance criteria, vague requirements, naming drift, and missing verification steps. Artifact diffing compares the current run with the previous run and emits a human-readable changelog plus JSON diff report.
 
 ### Conversation Branching
 Create branches from any message to explore alternate planning decisions without losing the main thread. Branch lineage is persisted, and generation/export can run from the selected branch context.
@@ -228,6 +231,13 @@ On Linux, the same command produces `.deb` and `.AppImage` bundles in `src-tauri
 - Runtime operations and troubleshooting: [`RUNBOOK.md`](RUNBOOK.md)
 - Release gate checklist: [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md)
 - Correctness/security audit history: [`AUDIT_REPORT.md`](AUDIT_REPORT.md)
+- Template authoring: [`docs/template-authoring.md`](docs/template-authoring.md)
+- Lint rules: [`docs/lint-rules.md`](docs/lint-rules.md)
+- Export presets: [`docs/export-presets.md`](docs/export-presets.md)
+- Repo ingest mode: [`docs/repo-ingest.md`](docs/repo-ingest.md)
+- Artifact diffing: [`docs/artifact-diffing.md`](docs/artifact-diffing.md)
+- Next phases roadmap: [`docs/next-phases-plan.md`](docs/next-phases-plan.md)
+- Release notes (2026-02-08): [`docs/release-notes-2026-02-08.md`](docs/release-notes-2026-02-08.md)
 
 ---
 
@@ -237,14 +247,22 @@ When you click **Forge the Plan** (available after 3+ exchanges), AuraForge crea
 
 ```
 my-project-plan/
-├── START_HERE.md       # Quick-start guide — read this first
-├── README.md           # Planning folder orientation
-├── SPEC.md             # Technical specification
-├── CLAUDE.md           # Claude-oriented context file
-├── PROMPTS.md          # Phased implementation prompts
-├── MODEL_HANDOFF.md    # Target-specific execution handoff
-├── CONVERSATION.md     # Full planning transcript
-└── manifest.json       # Export metadata + file checksums
+├── docs/
+│   ├── START_HERE.md
+│   ├── README.md
+│   ├── SPEC.md
+│   ├── CLAUDE.md
+│   └── PROMPTS.md
+├── handoff/
+│   ├── MODEL_HANDOFF.md
+│   └── EXECUTION_CHECKLIST.md
+├── context/
+│   └── CONVERSATION.md
+├── reports/
+│   ├── LINT_REPORT.md
+│   ├── ARTIFACT_CHANGELOG.md
+│   └── ARTIFACT_DIFF.json
+└── manifest.json
 ```
 
 Save to any folder via `Cmd+S` or the Save button. Folder names are sanitized to lowercase alphanumeric + hyphens (max 60 characters). AuraForge checks for existing folders (won't overwrite), verifies disk space (20 GB threshold), and handles permission errors with specific messages. `manifest.json` includes deterministic file metadata (`filename`, `bytes`, `lines`, `sha256`) to make handoff packs verifiable across coding models.

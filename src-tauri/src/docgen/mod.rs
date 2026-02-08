@@ -303,6 +303,14 @@ fn generate_model_handoff_doc(
     });
 
     output.push_str(
+        "\n## Verification Steps (Required)\n\n\
+         - [ ] Run every phase verification checklist in `PROMPTS.md`.\n\
+         - [ ] Resolve critical lint findings from `LINT_REPORT.md` before coding handoff.\n\
+         - [ ] Review `ARTIFACT_CHANGELOG.md` and confirm intended deltas.\n\
+         - [ ] If any requirement is uncertain, keep it marked as `[TBD]` with missing evidence.\n",
+    );
+
+    output.push_str(
         "\n## Reliability Rules\n\n\
          - Do not skip tests/checks listed in this plan.\n\
          - Do not rewrite architecture unless required by a failing constraint.\n\

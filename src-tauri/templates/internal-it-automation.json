@@ -1,0 +1,21 @@
+{
+  "id": "internal-it-automation",
+  "name": "Internal IT Automation",
+  "description": "Operational automation for internal systems with approvals, auditability, and rollback paths.",
+  "target_stack": "Workflow automation + integrations + audit logs",
+  "version": 1,
+  "recommended_target": "claude",
+  "required_sections": [
+    "process map",
+    "failure handling",
+    "approval gates",
+    "audit trail",
+    "verification"
+  ],
+  "verification_focus": [
+    "dry-run validation",
+    "permissions checks",
+    "rollback simulation"
+  ],
+  "seed_prompt": "Let's scope your internal IT automation safely. What process are we automating, what approvals are required, and what rollback action must always be available?"
+}

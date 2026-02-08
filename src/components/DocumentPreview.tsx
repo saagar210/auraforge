@@ -1,39 +1,14 @@
-import { useState, useRef, useEffect, memo } from "react";
+import { useState, useRef, useEffect, memo, lazy, Suspense } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
-import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
-import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
-import javascript from "react-syntax-highlighter/dist/esm/languages/prism/javascript";
-import jsx from "react-syntax-highlighter/dist/esm/languages/prism/jsx";
-import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
-import rust from "react-syntax-highlighter/dist/esm/languages/prism/rust";
-import python from "react-syntax-highlighter/dist/esm/languages/prism/python";
-import bash from "react-syntax-highlighter/dist/esm/languages/prism/bash";
-import json from "react-syntax-highlighter/dist/esm/languages/prism/json";
-import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
-import markdown from "react-syntax-highlighter/dist/esm/languages/prism/markdown";
-import css from "react-syntax-highlighter/dist/esm/languages/prism/css";
-import sql from "react-syntax-highlighter/dist/esm/languages/prism/sql";
-import toml from "react-syntax-highlighter/dist/esm/languages/prism/toml";
-
-SyntaxHighlighter.registerLanguage("typescript", typescript);
-SyntaxHighlighter.registerLanguage("javascript", javascript);
-SyntaxHighlighter.registerLanguage("jsx", jsx);
-SyntaxHighlighter.registerLanguage("tsx", tsx);
-SyntaxHighlighter.registerLanguage("rust", rust);
-SyntaxHighlighter.registerLanguage("python", python);
-SyntaxHighlighter.registerLanguage("bash", bash);
-SyntaxHighlighter.registerLanguage("json", json);
-SyntaxHighlighter.registerLanguage("yaml", yaml);
-SyntaxHighlighter.registerLanguage("markdown", markdown);
-SyntaxHighlighter.registerLanguage("css", css);
-SyntaxHighlighter.registerLanguage("sql", sql);
-SyntaxHighlighter.registerLanguage("toml", toml);
 import { Copy, Check, RefreshCw, FolderDown } from "lucide-react";
 import { clsx } from "clsx";
 import type { GeneratedDocument } from "../types";
+
+const LazySyntaxCodeBlock = lazy(async () => ({
+  default: (await import("./SyntaxCodeBlock")).SyntaxCodeBlock,
+}));
 
 const TAB_ORDER = [
   "START_HERE.md",
@@ -43,7 +18,46 @@ const TAB_ORDER = [
   "PROMPTS.md",
   "MODEL_HANDOFF.md",
   "CONVERSATION.md",
+  "LINT_REPORT.md",
+  "ARTIFACT_CHANGELOG.md",
+  "ARTIFACT_DIFF.json",
 ];
+
+function MarkdownCode({
+  className,
+  children,
+  ...props
+}: {
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  const match = /language-(\w+)/.exec(className || "");
+  const codeString = String(children).replace(/\n$/, "");
+
+  if (match) {
+    const language = match[1] ?? "text";
+    return (
+      <Suspense
+        fallback={
+          <pre className="bg-[#1A1517] border border-[#3a3335] rounded-lg p-4 overflow-x-auto text-[13px]">
+            <code>{codeString}</code>
+          </pre>
+        }
+      >
+        <LazySyntaxCodeBlock language={language} code={codeString} />
+      </Suspense>
+    );
+  }
+
+  return (
+    <code
+      className="bg-surface px-1.5 py-0.5 rounded text-accent-glow font-mono text-[13px]"
+      {...props}
+    >
+      {children}
+    </code>
+  );
+}
 
 const markdownComponents = {
   a({ href, children }: { href?: string; children?: React.ReactNode }) {
@@ -67,37 +81,7 @@ const markdownComponents = {
       </a>
     );
   },
-  code({ className, children, ...props }: { className?: string; children?: React.ReactNode }) {
-    const match = /language-(\w+)/.exec(className || "");
-    const codeString = String(children).replace(/\n$/, "");
-
-    if (match) {
-      return (
-        <SyntaxHighlighter
-          style={oneDark}
-          language={match[1]}
-          PreTag="div"
-          customStyle={{
-            background: "#1A1517",
-            border: "1px solid #3a3335",
-            borderRadius: "8px",
-            fontSize: "13px",
-          }}
-        >
-          {codeString}
-        </SyntaxHighlighter>
-      );
-    }
-
-    return (
-      <code
-        className="bg-surface px-1.5 py-0.5 rounded text-accent-glow font-mono text-[13px]"
-        {...props}
-      >
-        {children}
-      </code>
-    );
-  },
+  code: MarkdownCode,
   h1({ children }: { children?: React.ReactNode }) {
     return (
       <h1 className="font-heading text-2xl text-text-primary border-b border-border-subtle pb-3 mb-4 mt-6">

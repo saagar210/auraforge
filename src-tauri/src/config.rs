@@ -33,6 +33,7 @@ output:
   include_conversation: true                # Include CONVERSATION.md
   default_save_path: ~/Projects             # Default folder picker location
   default_target: generic                   # claude | codex | cursor | gemini | generic
+  lint_mode: fail_on_critical               # fail_on_critical | warn
 "#;
 
 pub fn auraforge_dir() -> PathBuf {
@@ -275,6 +276,13 @@ fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
             config.output.default_target
         )));
     }
+    let lint_mode = config.output.lint_mode.trim().to_ascii_lowercase();
+    if !["fail_on_critical", "warn"].contains(&lint_mode.as_str()) {
+        return Err(ConfigError::InvalidValue(format!(
+            "output.lint_mode={} (expected 'fail_on_critical' or 'warn')",
+            config.output.lint_mode
+        )));
+    }
 
     Ok(())
 }
@@ -300,6 +308,16 @@ fn normalize_local_model_config(config: &mut AppConfig) -> bool {
         .is_some_and(|key| key.trim().is_empty())
     {
         config.llm.api_key = None;
+        changed = true;
+    }
+
+    let lint_mode = config.output.lint_mode.trim().to_ascii_lowercase();
+    let normalized_lint_mode = match lint_mode.as_str() {
+        "fail_on_critical" | "warn" => lint_mode,
+        _ => "fail_on_critical".to_string(),
+    };
+    if config.output.lint_mode != normalized_lint_mode {
+        config.output.lint_mode = normalized_lint_mode;
         changed = true;
     }
 

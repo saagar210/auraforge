@@ -36,6 +36,11 @@ cd src-tauri
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
+cargo test commands::tests::prepare_export_documents_backfills_required_reports
+cargo test importer::tests::summarize_codebase_emits_grounded_sections_with_citations
+# Optional external ingest smoke (set to another local repo path)
+AURAFORGE_INGEST_SMOKE_REPO=/path/to/other/repo \
+  cargo test importer::tests::smoke_import_real_repo_from_env -- --ignored --nocapture
 cargo build
 cd ..
 npm run tauri build
@@ -49,9 +54,10 @@ Expected: all commands pass and `npm run tauri build` emits macOS/Linux bundles.
 2. Create new session and send a prompt.
 3. Confirm response streams and can be canceled safely.
 4. Forge planning documents.
-5. Save to folder and confirm docs plus `manifest.json` exist.
-6. Restart app and confirm settings persist.
-7. Disable primary search provider and confirm fallback still allows chat.
+5. Save to folder and confirm preset structure exists (`docs/`, `handoff/`, `context/`, `reports/`) plus `manifest.json`.
+6. Confirm `reports/LINT_REPORT.md`, `reports/ARTIFACT_CHANGELOG.md`, and `reports/ARTIFACT_DIFF.json` are generated.
+7. Restart app and confirm settings persist.
+8. Disable primary search provider and confirm fallback still allows chat.
 
 ## 5) Failure Playbooks
 
@@ -139,4 +145,3 @@ Record the following for every production issue:
 - Observed vs expected behavior
 - Error payload shown to user
 - Immediate mitigation used
-

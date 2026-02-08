@@ -687,3 +687,17 @@ Scope:
 
 Status:
 - Completed 2026-02-07 (`RUNBOOK.md`, README/AUDIT updates).
+
+### Block L: Next-Phase Follow-up Closure (2026-02-08)
+
+Objective:
+- Close remaining follow-ups from the next-phase roadmap with measurable verification and release evidence.
+
+Scope:
+1. Add export `manifest.json` schema compatibility assertions and tests.
+2. Optimize CI by replacing redundant targeted test reruns with fast invariant/documentation consistency checks.
+3. Add env-driven external repo-ingest smoke test and execute it against a second local production-like repository.
+4. Publish release evidence and outcomes in dedicated release notes.
+
+Status:
+- Completed 2026-02-08 (`docs/release-notes-2026-02-08.md`, CI/workflow and test updates).

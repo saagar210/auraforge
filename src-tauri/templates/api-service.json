@@ -4,5 +4,17 @@
   "description": "HTTP service with endpoint contracts, persistence, and operational boundaries.",
   "target_stack": "Backend API + DB + test strategy",
   "version": 1,
+  "recommended_target": "claude",
+  "required_sections": [
+    "endpoint contract",
+    "error semantics",
+    "acceptance criteria",
+    "verification"
+  ],
+  "verification_focus": [
+    "contract tests",
+    "failure modes",
+    "migration checks"
+  ],
   "seed_prompt": "Let's plan your API service with contract-first thinking. We'll define endpoint responsibilities, request/response shapes, persistence strategy, and failure semantics. Start by listing the top 3 API operations your users need first."
 }

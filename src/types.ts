@@ -18,6 +18,9 @@ export interface PlanningTemplate {
   description: string;
   target_stack: string;
   version: number;
+  recommended_target?: ForgeTarget | string;
+  required_sections?: string[];
+  verification_focus?: string[];
   seed_prompt: string;
 }
 
@@ -40,6 +43,18 @@ export interface CodebaseImportSummary {
   detected_stacks: string[];
   key_files: string[];
   summary_markdown: string;
+  architecture_summary_markdown: string;
+  risks_gaps_markdown: string;
+  phased_plan_markdown: string;
+  verification_plan_markdown: string;
+  citations: RepoCitation[];
+}
+
+export interface RepoCitation {
+  path: string;
+  line_start?: number | null;
+  line_end?: number | null;
+  snippet: string;
 }
 
 // Message types
@@ -152,6 +167,7 @@ export interface OutputConfig {
   include_conversation: boolean;
   default_save_path: string;
   default_target: ForgeTarget;
+  lint_mode: "fail_on_critical" | "warn";
 }
 
 export type ForgeTarget = 'claude' | 'codex' | 'cursor' | 'gemini' | 'generic';
@@ -198,6 +214,7 @@ export interface GenerationMetadata {
   target: ForgeTarget | string;
   provider: string;
   model: string;
+  run_id?: string | null;
   quality_json: string | null;
   confidence_json: string | null;
   created_at: string;

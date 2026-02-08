@@ -79,6 +79,8 @@ pub struct OutputConfig {
     pub include_conversation: bool,
     pub default_save_path: String,
     pub default_target: String,
+    #[serde(default = "default_lint_mode")]
+    pub lint_mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,9 +235,32 @@ pub struct GenerationMetadata {
     pub target: String,
     pub provider: String,
     pub model: String,
+    pub run_id: Option<String>,
     pub quality_json: Option<String>,
     pub confidence_json: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerationRunRecord {
+    pub run_id: String,
+    pub session_id: String,
+    pub target: String,
+    pub provider: String,
+    pub model: String,
+    pub input_fingerprint: String,
+    pub lint_summary_json: Option<String>,
+    pub diff_summary_json: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerationRunArtifact {
+    pub run_id: String,
+    pub filename: String,
+    pub bytes: usize,
+    pub lines: usize,
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,7 +270,18 @@ pub struct PlanningTemplate {
     pub description: String,
     pub target_stack: String,
     pub version: u8,
+    pub recommended_target: Option<String>,
+    pub required_sections: Option<Vec<String>>,
+    pub verification_focus: Option<Vec<String>>,
     pub seed_prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoCitation {
+    pub path: String,
+    pub line_start: Option<usize>,
+    pub line_end: Option<usize>,
+    pub snippet: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -257,6 +293,20 @@ pub struct CodebaseImportSummary {
     pub detected_stacks: Vec<String>,
     pub key_files: Vec<String>,
     pub summary_markdown: String,
+    #[serde(default)]
+    pub architecture_summary_markdown: String,
+    #[serde(default)]
+    pub risks_gaps_markdown: String,
+    #[serde(default)]
+    pub phased_plan_markdown: String,
+    #[serde(default)]
+    pub verification_plan_markdown: String,
+    #[serde(default)]
+    pub citations: Vec<RepoCitation>,
+}
+
+fn default_lint_mode() -> String {
+    "fail_on_critical".to_string()
 }
 
 impl Default for AppConfig {
@@ -284,6 +334,7 @@ impl Default for AppConfig {
                 include_conversation: true,
                 default_save_path: "~/Projects".to_string(),
                 default_target: "generic".to_string(),
+                lint_mode: "fail_on_critical".to_string(),
             },
         }
     }

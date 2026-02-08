@@ -4,10 +4,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
+use crate::artifact_diff::{build_diff_report, render_changelog_markdown};
 use crate::config::save_config;
 use crate::docgen;
 use crate::error::{AppError, ErrorResponse};
 use crate::importer;
+use crate::lint::{lint_documents, render_lint_report_markdown};
 use crate::llm::ChatMessage;
 use crate::search::{self, SearchResult};
 use crate::state::AppState;
@@ -125,6 +127,17 @@ const EXPORT_FILE_ORDER: &[&str] = &[
     "PROMPTS.md",
     "MODEL_HANDOFF.md",
     "CONVERSATION.md",
+    "LINT_REPORT.md",
+    "ARTIFACT_CHANGELOG.md",
+    "ARTIFACT_DIFF.json",
+];
+const EXPORT_MANIFEST_SCHEMA_VERSION: u32 = 3;
+const MIN_SUPPORTED_EXPORT_MANIFEST_SCHEMA_VERSION: u32 = 2;
+
+const REQUIRED_EXPORT_REPORTS: &[&str] = &[
+    "reports/LINT_REPORT.md",
+    "reports/ARTIFACT_CHANGELOG.md",
+    "reports/ARTIFACT_DIFF.json",
 ];
 
 fn to_response<E: Into<AppError>>(err: E) -> ErrorResponse {
@@ -617,8 +630,13 @@ pub async fn import_codebase_context(
     })
     .to_string();
     let content = format!(
-        "{}\n\nImported automatically from `{}`.",
-        summary.summary_markdown, summary.root_path
+        "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\nImported automatically from `{}`.",
+        summary.summary_markdown,
+        summary.architecture_summary_markdown,
+        summary.risks_gaps_markdown,
+        summary.phased_plan_markdown,
+        summary.verification_plan_markdown,
+        summary.root_path
     );
 
     state
@@ -870,13 +888,67 @@ pub async fn generate_documents(
         ))));
     }
 
+    let previous_docs = state
+        .db
+        .get_documents(&request.session_id)
+        .map_err(to_response)?;
+
     let docs = docgen::generate_all_documents(&app, &state, &request.session_id, &target)
         .await
         .map_err(to_response)?;
+    let lint_report = lint_documents(&docs);
+    let diff_report = build_diff_report(&previous_docs, &docs);
+
+    let mut drafts = docs
+        .iter()
+        .map(|doc| (doc.filename.clone(), doc.content.clone()))
+        .collect::<Vec<_>>();
+    drafts.retain(|(filename, _)| {
+        ![
+            "LINT_REPORT.md",
+            "ARTIFACT_CHANGELOG.md",
+            "ARTIFACT_DIFF.json",
+        ]
+        .contains(&filename.as_str())
+    });
+    drafts.push((
+        "LINT_REPORT.md".to_string(),
+        render_lint_report_markdown(&lint_report),
+    ));
+    drafts.push((
+        "ARTIFACT_CHANGELOG.md".to_string(),
+        render_changelog_markdown(&diff_report),
+    ));
+    drafts.push((
+        "ARTIFACT_DIFF.json".to_string(),
+        serde_json::to_string_pretty(&diff_report).unwrap_or_else(|_| "{}".to_string()),
+    ));
+
+    let docs = state
+        .db
+        .replace_documents(&request.session_id, &drafts)
+        .map_err(to_response)?;
+
+    let lint_mode = config.output.lint_mode.trim().to_ascii_lowercase();
+    let should_fail_on_critical = lint_mode == "fail_on_critical";
+    if lint_report.has_critical() && should_fail_on_critical && !request.force.unwrap_or(false) {
+        return Err(to_response(AppError::Validation(format!(
+            "SpecLint/PromptLint found {} critical issue(s). Review LINT_REPORT.md or continue with force=true.",
+            lint_report.summary.critical
+        ))));
+    }
 
     let confidence = docgen::analyze_generation_confidence(&docs, Some(&quality));
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let messages = state
+        .db
+        .get_messages(&request.session_id)
+        .map_err(to_response)?;
+    let input_fingerprint = build_input_fingerprint(&messages, &target, &config);
     let quality_json = serde_json::to_string(&quality).ok();
     let confidence_json = serde_json::to_string(&confidence).ok();
+    let lint_summary_json = serde_json::to_string(&lint_report.summary).ok();
+    let diff_summary_json = serde_json::to_string(&diff_report).ok();
     state
         .db
         .upsert_generation_metadata(
@@ -884,9 +956,27 @@ pub async fn generate_documents(
             target.as_str(),
             &config.llm.provider,
             &config.llm.model,
+            Some(run_id.as_str()),
             quality_json.as_deref(),
             confidence_json.as_deref(),
         )
+        .map_err(to_response)?;
+
+    let run = GenerationRunRecord {
+        run_id: run_id.clone(),
+        session_id: request.session_id.clone(),
+        target: target.as_str().to_string(),
+        provider: config.llm.provider.clone(),
+        model: config.llm.model.clone(),
+        input_fingerprint,
+        lint_summary_json,
+        diff_summary_json,
+        created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+    };
+    let run_artifacts = build_generation_run_artifacts(&run_id, &docs);
+    state
+        .db
+        .insert_generation_run(&run, &run_artifacts)
         .map_err(to_response)?;
 
     Ok(docs)
@@ -1029,7 +1119,6 @@ pub async fn save_to_folder(
             message: "No documents to save. Generate documents first.".to_string(),
         }));
     }
-    let export_documents = prepare_export_documents(&documents).map_err(to_response)?;
 
     let session = state
         .db
@@ -1051,6 +1140,14 @@ pub async fn save_to_folder(
                 .as_deref()
                 .and_then(extract_import_summary_from_metadata)
         });
+    let export_documents = prepare_export_documents(
+        &documents,
+        generation_meta
+            .as_ref()
+            .map(|meta| meta.target.as_str())
+            .unwrap_or("generic"),
+    )
+    .map_err(to_response)?;
 
     // Sanitize session name for folder name
     let sanitized_name = sanitize_folder_name(&session.name);
@@ -1091,6 +1188,12 @@ pub async fn save_to_folder(
             for doc in &docs_for_thread {
                 let staging_file_path = staging_dir.join(&doc.filename);
                 let final_file_path = output_dir_for_thread.join(&doc.filename);
+                if let Some(parent) = staging_file_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| AppError::FileSystem {
+                        path: parent.to_string_lossy().to_string(),
+                        message: format!("Failed to create export subdirectory: {}", e),
+                    })?;
+                }
                 std::fs::write(&staging_file_path, &doc.content).map_err(|e| {
                     if e.raw_os_error() == Some(28) {
                         AppError::FileSystem {
@@ -1122,14 +1225,32 @@ pub async fn save_to_folder(
             return Err(err);
         }
 
+        if !is_supported_export_manifest_schema_version(EXPORT_MANIFEST_SCHEMA_VERSION) {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            return Err(AppError::Validation(format!(
+                "Manifest schema v{} is outside supported compatibility range {}..={}.",
+                EXPORT_MANIFEST_SCHEMA_VERSION,
+                MIN_SUPPORTED_EXPORT_MANIFEST_SCHEMA_VERSION,
+                EXPORT_MANIFEST_SCHEMA_VERSION
+            )));
+        }
+
         let manifest = ExportManifest {
-            schema_version: 2,
+            schema_version: EXPORT_MANIFEST_SCHEMA_VERSION,
             session_id: session_id_for_thread.clone(),
             session_name: session_name_for_thread.clone(),
             target: meta_for_thread
                 .as_ref()
                 .map(|m| m.target.clone())
                 .unwrap_or_else(|| "generic".to_string()),
+            run_id: meta_for_thread.as_ref().and_then(|m| m.run_id.clone()),
+            export_preset: preset_label(
+                meta_for_thread
+                    .as_ref()
+                    .map(|m| m.target.as_str())
+                    .unwrap_or("generic"),
+            )
+            .to_string(),
             provider: meta_for_thread
                 .as_ref()
                 .map(|m| m.provider.clone())
@@ -1251,6 +1372,11 @@ fn sanitize_folder_name(name: &str) -> String {
     }
 }
 
+fn is_supported_export_manifest_schema_version(version: u32) -> bool {
+    (MIN_SUPPORTED_EXPORT_MANIFEST_SCHEMA_VERSION..=EXPORT_MANIFEST_SCHEMA_VERSION)
+        .contains(&version)
+}
+
 fn analyze_plan_readiness_internal(
     state: &State<'_, AppState>,
     session_id: &str,
@@ -1286,6 +1412,8 @@ struct ExportManifest {
     session_id: String,
     session_name: String,
     target: String,
+    run_id: Option<String>,
+    export_preset: String,
     provider: String,
     model: String,
     created_at: String,
@@ -1311,19 +1439,147 @@ struct ExportDocument {
 
 // ============ HELPERS ============
 
-fn prepare_export_documents(docs: &[GeneratedDocument]) -> Result<Vec<ExportDocument>, AppError> {
-    docs.iter()
+fn prepare_export_documents(
+    docs: &[GeneratedDocument],
+    target: &str,
+) -> Result<Vec<ExportDocument>, AppError> {
+    let mut exports = docs
+        .iter()
         .map(|doc| {
-            validate_export_filename(&doc.filename)?;
+            validate_source_filename(&doc.filename)?;
+            let export_path = preset_export_path(target, &doc.filename);
+            validate_export_path(&export_path)?;
             Ok(ExportDocument {
-                filename: doc.filename.clone(),
+                filename: export_path,
                 content: doc.content.clone(),
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, AppError>>()?;
+
+    let checklist_path = "handoff/EXECUTION_CHECKLIST.md";
+    validate_export_path(checklist_path)?;
+    exports.push(ExportDocument {
+        filename: checklist_path.to_string(),
+        content: build_execution_checklist_doc(target),
+    });
+    ensure_required_export_reports(&mut exports)?;
+
+    Ok(exports)
 }
 
-fn validate_export_filename(filename: &str) -> Result<(), AppError> {
+fn ensure_required_export_reports(exports: &mut Vec<ExportDocument>) -> Result<(), AppError> {
+    let existing = exports
+        .iter()
+        .map(|doc| doc.filename.clone())
+        .collect::<std::collections::HashSet<_>>();
+
+    for required_path in REQUIRED_EXPORT_REPORTS {
+        if existing.contains(*required_path) {
+            continue;
+        }
+        validate_export_path(required_path)?;
+        exports.push(ExportDocument {
+            filename: (*required_path).to_string(),
+            content: build_missing_report_placeholder(required_path),
+        });
+    }
+
+    Ok(())
+}
+
+fn build_missing_report_placeholder(path: &str) -> String {
+    match path {
+        "reports/LINT_REPORT.md" => String::from(
+            "# Lint Report (Backfilled)\n\nNo lint report was stored for this run. Regenerate the plan to produce a full SpecLint/PromptLint report.\n",
+        ),
+        "reports/ARTIFACT_CHANGELOG.md" => String::from(
+            "# Artifact Changelog (Backfilled)\n\nNo prior changelog was stored for this run. Regenerate the plan to compute an artifact-to-artifact diff.\n",
+        ),
+        "reports/ARTIFACT_DIFF.json" => String::from(
+            "{\n  \"backfilled\": true,\n  \"note\": \"No artifact diff was stored for this run. Regenerate the plan to compute structured diffs.\"\n}\n",
+        ),
+        _ => String::new(),
+    }
+}
+
+fn preset_export_path(target: &str, filename: &str) -> String {
+    let basename = std::path::Path::new(filename)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(filename);
+
+    let normalized_target = target.trim().to_ascii_lowercase();
+    let docs_dir = match normalized_target.as_str() {
+        "codex" | "claude" | "cursor" | "generic" | "gemini" => "docs",
+        _ => "docs",
+    };
+
+    match basename {
+        "MODEL_HANDOFF.md" => format!("handoff/{}", basename),
+        "CONVERSATION.md" => format!("context/{}", basename),
+        "LINT_REPORT.md" | "ARTIFACT_CHANGELOG.md" | "ARTIFACT_DIFF.json" => {
+            format!("reports/{}", basename)
+        }
+        _ => format!("{}/{}", docs_dir, basename),
+    }
+}
+
+fn preset_label(target: &str) -> &'static str {
+    match target.trim().to_ascii_lowercase().as_str() {
+        "codex" => "codex",
+        "claude" => "claude_code",
+        "cursor" => "cursor",
+        _ => "generic_agent",
+    }
+}
+
+fn build_execution_checklist_doc(target: &str) -> String {
+    format!(
+        "# Execution Checklist ({})\n\n## Required verification gates\n\n- [ ] Read `docs/START_HERE.md` and `handoff/MODEL_HANDOFF.md`\n- [ ] Run all verification steps in `docs/PROMPTS.md` phase-by-phase\n- [ ] Review `reports/LINT_REPORT.md` and resolve critical findings\n- [ ] Review `reports/ARTIFACT_CHANGELOG.md` before coding handoff\n- [ ] Keep unknowns marked as `TBD` until evidence is available\n",
+        preset_label(target)
+    )
+}
+
+fn validate_export_path(path_value: &str) -> Result<(), AppError> {
+    let trimmed = path_value.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Validation(
+            "Cannot export document with an empty filename.".to_string(),
+        ));
+    }
+    let path = std::path::Path::new(trimmed);
+    if path.is_absolute() {
+        return Err(AppError::Validation(format!(
+            "Unsafe export path '{}'. Absolute paths are not allowed.",
+            path_value
+        )));
+    }
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(value) => {
+                if value.to_string_lossy().trim().is_empty() {
+                    return Err(AppError::Validation(format!(
+                        "Unsafe export path '{}'.",
+                        path_value
+                    )));
+                }
+            }
+            std::path::Component::CurDir => continue,
+            std::path::Component::ParentDir
+            | std::path::Component::Prefix(_)
+            | std::path::Component::RootDir => {
+                return Err(AppError::Validation(format!(
+                    "Unsafe export path '{}'.",
+                    path_value
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_source_filename(filename: &str) -> Result<(), AppError> {
     let trimmed = filename.trim();
     if trimmed.is_empty() {
         return Err(AppError::Validation(
@@ -1333,21 +1589,10 @@ fn validate_export_filename(filename: &str) -> Result<(), AppError> {
     let path = std::path::Path::new(trimmed);
     if path.is_absolute() || path.components().count() != 1 {
         return Err(AppError::Validation(format!(
-            "Unsafe export filename '{}'. Nested or absolute paths are not allowed.",
+            "Unsafe source filename '{}'. Nested or absolute paths are not allowed.",
             filename
         )));
     }
-    let is_same_name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .is_some_and(|value| value == trimmed);
-    if !is_same_name {
-        return Err(AppError::Validation(format!(
-            "Unsafe export filename '{}'.",
-            filename
-        )));
-    }
-
     Ok(())
 }
 
@@ -1378,9 +1623,13 @@ fn build_export_manifest_files(docs: &[ExportDocument]) -> Vec<ExportManifestFil
 }
 
 fn export_file_rank(filename: &str) -> usize {
+    let basename = std::path::Path::new(filename)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(filename);
     EXPORT_FILE_ORDER
         .iter()
-        .position(|known| known == &filename)
+        .position(|known| known == &basename)
         .unwrap_or(EXPORT_FILE_ORDER.len())
 }
 
@@ -1389,6 +1638,50 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hasher.update(bytes);
     let digest = hasher.finalize();
     digest.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn build_input_fingerprint(
+    messages: &[Message],
+    target: &ForgeTarget,
+    config: &AppConfig,
+) -> String {
+    let mut material = format!(
+        "target={};provider={};model={};temperature={};max_tokens={};",
+        target.as_str(),
+        config.llm.provider,
+        config.llm.model,
+        config.llm.temperature,
+        config.llm.max_tokens
+    );
+    for message in messages {
+        if message.role == "system" {
+            continue;
+        }
+        material.push_str(&format!("{}:{}|", message.role, message.content));
+    }
+    sha256_hex(material.as_bytes())
+}
+
+fn build_generation_run_artifacts(
+    run_id: &str,
+    docs: &[GeneratedDocument],
+) -> Vec<GenerationRunArtifact> {
+    let mut artifacts = docs
+        .iter()
+        .map(|doc| GenerationRunArtifact {
+            run_id: run_id.to_string(),
+            filename: doc.filename.clone(),
+            bytes: doc.content.len(),
+            lines: if doc.content.is_empty() {
+                0
+            } else {
+                doc.content.lines().count()
+            },
+            sha256: sha256_hex(doc.content.as_bytes()),
+        })
+        .collect::<Vec<_>>();
+    artifacts.sort_by(|a, b| a.filename.cmp(&b.filename));
+    artifacts
 }
 
 fn extract_import_summary_from_metadata(metadata: &str) -> Option<CodebaseImportSummary> {
@@ -1436,12 +1729,15 @@ mod tests {
 
     #[test]
     fn build_export_manifest_files_orders_known_documents_first() {
-        let export_docs = prepare_export_documents(&[
-            doc("Z_NOTES.md", "notes"),
-            doc("README.md", "read me"),
-            doc("START_HERE.md", "start here"),
-            doc("A_CUSTOM.md", "custom"),
-        ])
+        let export_docs = prepare_export_documents(
+            &[
+                doc("Z_NOTES.md", "notes"),
+                doc("README.md", "read me"),
+                doc("START_HERE.md", "start here"),
+                doc("A_CUSTOM.md", "custom"),
+            ],
+            "codex",
+        )
         .expect("export docs should validate");
         let files = build_export_manifest_files(&export_docs);
 
@@ -1449,22 +1745,27 @@ mod tests {
         assert_eq!(
             ordered_names,
             vec![
-                "START_HERE.md".to_string(),
-                "README.md".to_string(),
-                "A_CUSTOM.md".to_string(),
-                "Z_NOTES.md".to_string(),
+                "docs/START_HERE.md".to_string(),
+                "docs/README.md".to_string(),
+                "reports/LINT_REPORT.md".to_string(),
+                "reports/ARTIFACT_CHANGELOG.md".to_string(),
+                "reports/ARTIFACT_DIFF.json".to_string(),
+                "docs/A_CUSTOM.md".to_string(),
+                "docs/Z_NOTES.md".to_string(),
+                "handoff/EXECUTION_CHECKLIST.md".to_string(),
             ]
         );
     }
 
     #[test]
     fn build_export_manifest_files_includes_hash_bytes_and_lines() {
-        let export_docs = prepare_export_documents(&[doc("SPEC.md", "abc"), doc("EMPTY.md", "")])
-            .expect("export docs should validate");
+        let export_docs =
+            prepare_export_documents(&[doc("SPEC.md", "abc"), doc("EMPTY.md", "")], "generic")
+                .expect("export docs should validate");
         let files = build_export_manifest_files(&export_docs);
         let spec = files
             .iter()
-            .find(|f| f.filename == "SPEC.md")
+            .find(|f| f.filename == "docs/SPEC.md")
             .expect("SPEC.md entry missing");
         assert_eq!(spec.bytes, 3);
         assert_eq!(spec.lines, 1);
@@ -1475,7 +1776,7 @@ mod tests {
 
         let empty = files
             .iter()
-            .find(|f| f.filename == "EMPTY.md")
+            .find(|f| f.filename == "docs/EMPTY.md")
             .expect("EMPTY.md entry missing");
         assert_eq!(empty.bytes, 0);
         assert_eq!(empty.lines, 0);
@@ -1487,16 +1788,95 @@ mod tests {
 
     #[test]
     fn prepare_export_documents_rejects_nested_or_absolute_paths() {
-        let nested = prepare_export_documents(&[doc("../escape.md", "bad")]);
+        let nested = prepare_export_documents(&[doc("../escape.md", "bad")], "generic");
         assert!(nested.is_err(), "parent traversal should be rejected");
 
-        let absolute = prepare_export_documents(&[doc("/tmp/evil.md", "bad")]);
+        let absolute = prepare_export_documents(&[doc("/tmp/evil.md", "bad")], "generic");
         assert!(absolute.is_err(), "absolute paths should be rejected");
     }
 
     #[test]
     fn prepare_export_documents_rejects_empty_filename() {
-        let result = prepare_export_documents(&[doc("   ", "bad")]);
+        let result = prepare_export_documents(&[doc("   ", "bad")], "generic");
         assert!(result.is_err(), "blank filenames should be rejected");
+    }
+
+    #[test]
+    fn prepare_export_documents_backfills_required_reports() {
+        let export_docs = prepare_export_documents(&[doc("SPEC.md", "abc")], "generic")
+            .expect("export docs should validate");
+        let names = export_docs
+            .iter()
+            .map(|doc| doc.filename.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            names.contains(&"reports/LINT_REPORT.md"),
+            "missing lint report placeholder"
+        );
+        assert!(
+            names.contains(&"reports/ARTIFACT_CHANGELOG.md"),
+            "missing changelog placeholder"
+        );
+        assert!(
+            names.contains(&"reports/ARTIFACT_DIFF.json"),
+            "missing diff placeholder"
+        );
+
+        let diff_doc = export_docs
+            .iter()
+            .find(|doc| doc.filename == "reports/ARTIFACT_DIFF.json")
+            .expect("backfilled diff report must exist");
+        serde_json::from_str::<serde_json::Value>(&diff_doc.content)
+            .expect("backfilled diff report should remain valid json");
+    }
+
+    #[test]
+    fn prepare_export_documents_keeps_existing_reports() {
+        let export_docs = prepare_export_documents(
+            &[doc("LINT_REPORT.md", "already-here"), doc("SPEC.md", "abc")],
+            "generic",
+        )
+        .expect("export docs should validate");
+        let lint_report = export_docs
+            .iter()
+            .find(|doc| doc.filename == "reports/LINT_REPORT.md")
+            .expect("lint report should be exported");
+        assert_eq!(lint_report.content, "already-here");
+    }
+
+    #[test]
+    fn export_manifest_schema_version_is_supported() {
+        assert!(
+            is_supported_export_manifest_schema_version(EXPORT_MANIFEST_SCHEMA_VERSION),
+            "current manifest schema should always be supported"
+        );
+    }
+
+    #[test]
+    fn export_manifest_schema_supports_previous_version_for_compatibility() {
+        assert!(
+            is_supported_export_manifest_schema_version(
+                MIN_SUPPORTED_EXPORT_MANIFEST_SCHEMA_VERSION
+            ),
+            "minimum supported schema should remain valid for backward compatibility"
+        );
+        assert!(
+            is_supported_export_manifest_schema_version(2),
+            "schema v2 compatibility should remain available for current handoff consumers"
+        );
+    }
+
+    #[test]
+    fn export_manifest_schema_rejects_out_of_range_versions() {
+        assert!(
+            !is_supported_export_manifest_schema_version(
+                MIN_SUPPORTED_EXPORT_MANIFEST_SCHEMA_VERSION.saturating_sub(1)
+            ),
+            "schemas older than supported minimum should be rejected"
+        );
+        assert!(
+            !is_supported_export_manifest_schema_version(EXPORT_MANIFEST_SCHEMA_VERSION + 1),
+            "future schema versions should be rejected until explicitly supported"
+        );
     }
 }
