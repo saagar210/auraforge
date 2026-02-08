@@ -197,7 +197,7 @@ See [`distribution/INSTALL.md`](distribution/INSTALL.md) for detailed instructio
 ```bash
 # Example using Ollama (default path)
 brew install ollama
-ollama pull qwen3-coder:30b-a3b-instruct-q4_K_M
+ollama pull qwen3-coder
 
 # Clone and run
 git clone https://github.com/saagar210/auraforge.git
