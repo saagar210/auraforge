@@ -205,7 +205,7 @@ ollama pull qwen3-coder
 # Clone and run
 git clone https://github.com/saagar210/auraforge.git
 cd auraforge
-npm install
+npm ci
 npm run tauri dev
 ```
 

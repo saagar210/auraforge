@@ -183,7 +183,7 @@ Generate this ONLY from the tech stack. Different stacks get different structure
 Exact commands for this specific tech stack:
 ```bash
 # Install
-npm install                      # Frontend dependencies
+npm ci                           # Frontend dependencies (deterministic; requires package-lock.json)
 cd src-tauri && cargo build      # Rust dependencies
 
 # Development

@@ -16,7 +16,7 @@ Thanks for your interest in contributing to AuraForge.
 ```bash
 git clone https://github.com/saagar210/auraforge.git
 cd auraforge
-npm install
+npm ci
 npm run tauri dev
 ```
 

@@ -1453,7 +1453,7 @@ project-root/
 
 ## Commands
 
-- `npm install` - Install dependencies
+- `npm ci` - Install dependencies deterministically (requires `package-lock.json`)
 - `npm run dev` - Start development server
 - `npm run build` - Build for production
 - `npm run test` - Run tests
@@ -1511,7 +1511,7 @@ Reference CLAUDE.md for project conventions.
 
 ### What You Should Have After
 - [ ] Project folder created with correct structure
-- [ ] Dependencies installed (`npm install` succeeds)
+- [ ] Dependencies installed (`npm ci` succeeds when a lockfile exists)
 - [ ] Dev server runs (`npm run dev` shows Hello World)
 - [ ] CLAUDE.md is in the project root
 
