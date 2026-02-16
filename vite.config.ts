@@ -3,10 +3,12 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 const host = process.env.TAURI_DEV_HOST;
+const cacheDir = process.env.VITE_CACHE_DIR || "node_modules/.vite";
 
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
+  cacheDir,
   build: {
     rollupOptions: {
       output: {
