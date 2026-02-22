@@ -15,6 +15,7 @@
 | PR `#12` merged to `main` | `gh pr view 12 -R saagar210/auraforge --json state,mergedAt,mergeCommit` | Closed |
 | `release-rc` published on default branch | `gh workflow list -R saagar210/auraforge --json name,path,state` shows `.github/workflows/release-rc.yml` active | Closed |
 | Unsigned control release path validated | Run `22276565971` succeeded; artifact `auraforge-5-unsigned-qa` ID `5606803423` | Closed |
+| Signed gate re-test executed | Run `22276721898` fails fast with explicit missing-secrets enforcement | Closed (evidence captured) |
 
 ## Week 4 Outcome
 - Week 4 closed as: `No-go`

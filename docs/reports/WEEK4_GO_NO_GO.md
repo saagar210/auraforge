@@ -3,7 +3,7 @@
 ## Decision Metadata
 - Week: `Week 4 (Phase 4)`
 - Decision status: `No-go (final for Week 4)`
-- Decision timestamp (UTC): `2026-02-22T11:55:46Z`
+- Decision timestamp (UTC): `2026-02-22T12:01:17Z`
 - PM owner: `AuraForge PM`
 - Engineering owner: `AuraForge Eng`
 - Week 5 track selected: `Track B (remediation sprint)`
@@ -14,7 +14,7 @@
 | Engineering baseline | `bash .codex/scripts/run_verify_commands.sh` | `.codex/verify.commands` | Pass | Command completed successfully on 2026-02-22 |
 | Security baseline | `npm audit --json` | `docs/release/RC_CHECKLIST.md` | Pass | 0 vulnerabilities on 2026-02-22 |
 | Release prerequisites | `npm run phase4:prereqs` | `package.json`, `scripts/release/check-phase4-prereqs.sh` | Fail | Only failing prerequisite is missing required `APPLE_*` secrets |
-| Signed release dispatch | `gh workflow run release-rc.yml ... require_signed=true` | `docs/release/RC_CHECKLIST.md` | Fail | Run `22276565984` failed early: missing `APPLE_*` secrets |
+| Signed release dispatch | `gh workflow run release-rc.yml ... require_signed=true` | `docs/release/RC_CHECKLIST.md` | Fail | Latest run `22276721898` failed early: missing `APPLE_*` secrets |
 | Signed artifact verification | `codesign` / `spctl` / `stapler` in release workflow | `.github/workflows/release-rc.yml`, `scripts/release/verify-macos-artifact.sh` | Not run | Signed lane blocked by missing secrets |
 | Signed critical-path smoke | `docs/release/SIGNED_SMOKE_CHECKLIST.md` execution | `docs/release/SIGNED_SMOKE_CHECKLIST.md` | Not run | No signed artifact available |
 | Unsigned control release | `gh workflow run release-rc.yml ... require_signed=false` | `.github/workflows/release-rc.yml` | Pass | Run `22276565971` succeeded; unsigned artifact uploaded |
@@ -24,9 +24,10 @@
 | Evidence Item | Value |
 | --- | --- |
 | PR merge evidence | `https://github.com/saagar210/auraforge/pull/12` merged at `2026-02-22T11:41:01Z` |
-| Signed workflow run URL | `https://github.com/saagar210/auraforge/actions/runs/22276565984` |
-| Signed workflow run ID | `22276565984` |
-| Signed workflow outcome | `failure` (missing required `APPLE_*` secrets) |
+| Latest signed workflow run URL | `https://github.com/saagar210/auraforge/actions/runs/22276721898` |
+| Latest signed workflow run ID | `22276721898` |
+| Latest signed workflow outcome | `failure` (missing required `APPLE_*` secrets) |
+| Prior signed workflow run URL | `https://github.com/saagar210/auraforge/actions/runs/22276565984` |
 | Unsigned workflow run URL | `https://github.com/saagar210/auraforge/actions/runs/22276565971` |
 | Unsigned workflow run ID | `22276565971` |
 | Unsigned artifact ID/name | `5606803423 / auraforge-5-unsigned-qa` |
@@ -52,9 +53,9 @@
 | `gh workflow list -R saagar210/auraforge --json name,path,state` | Pass | `release-rc` present on default branch |
 | `gh secret list -R saagar210/auraforge --json name,updatedAt` | Fail (release prereq) | Empty list; no `APPLE_*` secrets configured |
 | `npm run phase4:prereqs` | Fail | Fails on missing secrets only |
-| `gh workflow run release-rc.yml -R saagar210/auraforge --ref main -f channel=qa -f require_signed=true` | Fail | Created run `22276565984`; failed early on missing secrets |
-| `gh run view 22276565984 -R saagar210/auraforge --log-failed` | Fail (expected) | Explicit error: "Signed mode required, but one or more APPLE_* secrets are missing." |
-| `gh workflow run release-rc.yml -R saagar210/auraforge --ref main -f channel=qa -f require_signed=false` | Pass | Created run `22276565971`; unsigned artifact path succeeded |
+| `gh workflow run release-rc.yml -R saagar210/auraforge --ref main -f channel=qa -f require_signed=true` | Fail | Latest run `22276721898`; failed early on missing secrets |
+| `gh run view 22276721898 -R saagar210/auraforge --log-failed` | Fail (expected) | Explicit error: "Signed mode required, but one or more APPLE_* secrets are missing." |
+| `gh workflow run release-rc.yml -R saagar210/auraforge --ref main -f channel=qa -f require_signed=false` | Pass | Prior run `22276565971`; unsigned artifact path succeeded |
 | `gh api repos/saagar210/auraforge/actions/runs/22276565971/artifacts` | Pass | Captured artifact id/name/digest |
 | `bash .codex/scripts/run_verify_commands.sh` | Pass | Deterministic local engineering gates green |
 | `npm audit --json` | Pass | 0 vulnerabilities |

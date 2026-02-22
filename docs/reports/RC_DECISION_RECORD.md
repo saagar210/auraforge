@@ -3,16 +3,17 @@
 ## Decision Metadata
 - Decision status: `No-go`
 - Decision date: `2026-02-22`
-- Decision timestamp (UTC): `2026-02-22T11:55:46Z`
+- Decision timestamp (UTC): `2026-02-22T12:01:17Z`
 - Decision owners: `AuraForge PM` (primary), `AuraForge Eng` (backup)
 - Candidate label: `RC1-phase4-week4-close`
 - Target channel: `qa`
 - Follow-on track: `Week 5 Track B (remediation sprint)`
 
 ## Required Evidence Fields
-- Signed workflow run URL: `https://github.com/saagar210/auraforge/actions/runs/22276565984`
-- Signed workflow run ID: `22276565984`
-- Signed workflow result: `failure` (missing required `APPLE_*` secrets)
+- Latest signed workflow run URL: `https://github.com/saagar210/auraforge/actions/runs/22276721898`
+- Latest signed workflow run ID: `22276721898`
+- Latest signed workflow result: `failure` (missing required `APPLE_*` secrets)
+- Prior signed workflow run URL: `https://github.com/saagar210/auraforge/actions/runs/22276565984`
 - Signed artifact ID/name: `N/A (signed run terminated before artifact build)`
 - Signed artifact app path: `N/A (signed run terminated before artifact build)`
 - Signed artifact dmg path: `N/A (signed run terminated before artifact build)`
@@ -32,7 +33,7 @@
 | Smoke tests (`npm run test:smoke`) | `package.json` | Pass | Deterministic local smoke lane passed on 2026-02-22 |
 | Rust tests (`cargo test --manifest-path src-tauri/Cargo.toml`) | `package.json` | Pass | Included in verify run on 2026-02-22 |
 | Security (`npm audit --json`) | `docs/release/RC_CHECKLIST.md` | Pass | 0 vulnerabilities on 2026-02-22 |
-| Signed CI release (`release-rc` with `require_signed=true`) | `.github/workflows/release-rc.yml` | Fail | Run `22276565984` failed at signing prerequisite enforcement |
+| Signed CI release (`release-rc` with `require_signed=true`) | `.github/workflows/release-rc.yml` | Fail | Latest run `22276721898` failed at signing prerequisite enforcement |
 | Signed artifact verification (`codesign`/`spctl`/`stapler`) | `.github/workflows/release-rc.yml`, `scripts/release/verify-macos-artifact.sh` | Not run | Signed build blocked before verification steps |
 | Critical-path signed artifact smoke | `docs/release/SIGNED_SMOKE_CHECKLIST.md` | Not run | No signed artifact available |
 | Unsigned control release (`release-rc` with `require_signed=false`) | `.github/workflows/release-rc.yml` | Pass | Run `22276565971` produced unsigned QA artifact |
@@ -58,7 +59,7 @@
 3. Command: `gh secret list -R saagar210/auraforge --json name,updatedAt`
    - Result: `[]` (required `APPLE_*` secrets missing).
 4. Command: `gh workflow run release-rc.yml -R saagar210/auraforge --ref main -f channel=qa -f require_signed=true`
-   - Result: run `22276565984` failed early with missing-secrets enforcement.
+   - Result: latest run `22276721898` failed early with missing-secrets enforcement.
 5. Command: `gh workflow run release-rc.yml -R saagar210/auraforge --ref main -f channel=qa -f require_signed=false`
    - Result: run `22276565971` succeeded; unsigned artifact uploaded.
 6. Command: `bash .codex/scripts/run_verify_commands.sh`, `npm audit --json`, `npm run phase4:gates`
