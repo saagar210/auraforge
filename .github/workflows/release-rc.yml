@@ -23,27 +23,32 @@ jobs:
     permissions:
       contents: read
     env:
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 20
           cache: npm
+
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
+
       - run: npm ci
       - run: npm run build
+
       - name: Detect signing readiness
         id: signing
         shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           if [[ -n "${APPLE_CERTIFICATE}" && -n "${APPLE_CERTIFICATE_PASSWORD}" && -n "${APPLE_SIGNING_IDENTITY}" && -n "${APPLE_ID}" && -n "${APPLE_PASSWORD}" && -n "${APPLE_TEAM_ID}" ]]; then
@@ -51,14 +56,19 @@ jobs:
           else
             echo "mode=unsigned" >> "$GITHUB_OUTPUT"
           fi
+
       - name: Enforce signed mode when required
         if: ${{ inputs.require_signed && steps.signing.outputs.mode != 'signed' }}
         run: |
           echo "Signed mode required, but one or more APPLE_* secrets are missing."
           exit 1
+
       - name: Install signing certificate
         if: ${{ steps.signing.outputs.mode == 'signed' }}
         shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
           KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
@@ -72,26 +82,49 @@ jobs:
           security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
       - name: Detect hardened runtime setting
         id: hardening
         shell: bash
         run: |
           set -euo pipefail
           node -e "const fs=require('fs'); const cfg=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8')); const enabled = cfg && cfg.bundle && cfg.bundle.macOS && cfg.bundle.macOS.hardenedRuntime === true; process.stdout.write('status=' + (enabled ? 'enabled' : 'disabled') + '\n');" >> "$GITHUB_OUTPUT"
-      - name: Build RC artifact
+
+      - name: Build RC artifact (signed)
+        if: ${{ steps.signing.outputs.mode == 'signed' }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run tauri -- build
-      - name: Verify macOS artifact integrity
-        id: verify_artifact
+
+      - name: Build RC artifact (unsigned)
+        if: ${{ steps.signing.outputs.mode != 'signed' }}
         shell: bash
         run: |
           set -euo pipefail
+          unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+          npm run tauri -- build
+
+      - name: Verify macOS artifact integrity
+        id: verify_artifact
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
           bash scripts/release/verify-macos-artifact.sh "src-tauri/target/release/bundle" "${{ steps.signing.outputs.mode }}"
+
       - name: Upload RC bundle artifacts
         uses: actions/upload-artifact@v4
         with:
           name: auraforge-${{ github.run_number }}-${{ steps.signing.outputs.mode }}-${{ inputs.channel }}
           path: |
             src-tauri/target/release/bundle/**
+
       - name: Release summary
         run: |
           {
