@@ -37,6 +37,8 @@ jobs:
           node-version: 20
           cache: npm
       - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
       - run: npm ci
       - run: npm run build
       - name: Detect signing readiness
