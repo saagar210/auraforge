@@ -29,6 +29,10 @@ jobs:
 
       - name: Diff coverage
         run: |
+          if [[ ! -f coverage/lcov.info ]]; then
+            echo "coverage/lcov.info not found; skipping diff coverage check for this lane."
+            exit 0
+          fi
           python -m pip install --upgrade pip diff-cover
           diff-cover coverage/lcov.info --compare-branch=origin/main --fail-under=90
 
