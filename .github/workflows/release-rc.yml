@@ -70,6 +70,12 @@ jobs:
           security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+      - name: Detect hardened runtime setting
+        id: hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "const fs=require('fs'); const cfg=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8')); const enabled = cfg && cfg.bundle && cfg.bundle.macOS && cfg.bundle.macOS.hardenedRuntime === true; process.stdout.write(\`status=${enabled ? 'enabled' : 'disabled'}\\n\`);" >> "$GITHUB_OUTPUT"
       - name: Build RC artifact
         run: npm run tauri -- build
       - name: Verify macOS artifact integrity
@@ -92,7 +98,7 @@ jobs:
             echo "- Channel: \`${{ inputs.channel }}\`"
             echo "- Signing mode: \`${{ steps.signing.outputs.mode }}\`"
             echo "- Require signed: \`${{ inputs.require_signed }}\`"
-            echo "- Hardened runtime: \`enabled\`"
+            echo "- Hardened runtime: \`${{ steps.hardening.outputs.status }}\`"
             echo "- Run URL: \`${RUN_URL}\`"
             echo "- Artifact path: \`src-tauri/target/release/bundle/\`"
             echo "- Artifact app: \`${{ steps.verify_artifact.outputs.artifact_app_path }}\`"
