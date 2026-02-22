@@ -1,0 +1,107 @@
+name: release-rc
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel"
+        required: true
+        default: "internal-rc"
+        type: choice
+        options:
+          - internal-rc
+          - qa
+      require_signed:
+        description: "Fail the workflow if signing secrets are missing"
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  build-rc-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@master
+      - run: npm ci
+      - run: npm run build
+      - name: Detect signing readiness
+        id: signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${APPLE_CERTIFICATE}" && -n "${APPLE_CERTIFICATE_PASSWORD}" && -n "${APPLE_SIGNING_IDENTITY}" && -n "${APPLE_ID}" && -n "${APPLE_PASSWORD}" && -n "${APPLE_TEAM_ID}" ]]; then
+            echo "mode=signed" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=unsigned" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Enforce signed mode when required
+        if: ${{ inputs.require_signed && steps.signing.outputs.mode != 'signed' }}
+        run: |
+          echo "Signed mode required, but one or more APPLE_* secrets are missing."
+          exit 1
+      - name: Install signing certificate
+        if: ${{ steps.signing.outputs.mode == 'signed' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          KEYCHAIN_PATH="$RUNNER_TEMP/auraforge-build.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/apple-signing-cert.p12"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+      - name: Build RC artifact
+        run: npm run tauri -- build
+      - name: Verify macOS artifact integrity
+        id: verify_artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/release/verify-macos-artifact.sh "src-tauri/target/release/bundle" "${{ steps.signing.outputs.mode }}"
+      - name: Upload RC bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: auraforge-${{ github.run_number }}-${{ steps.signing.outputs.mode }}-${{ inputs.channel }}
+          path: |
+            src-tauri/target/release/bundle/**
+      - name: Release summary
+        run: |
+          {
+            echo "## AuraForge RC Build"
+            echo ""
+            echo "- Channel: \`${{ inputs.channel }}\`"
+            echo "- Signing mode: \`${{ steps.signing.outputs.mode }}\`"
+            echo "- Require signed: \`${{ inputs.require_signed }}\`"
+            echo "- Hardened runtime: \`enabled\`"
+            echo "- Run URL: \`${RUN_URL}\`"
+            echo "- Artifact path: \`src-tauri/target/release/bundle/\`"
+            echo "- Artifact app: \`${{ steps.verify_artifact.outputs.artifact_app_path }}\`"
+            echo "- Artifact dmg: \`${{ steps.verify_artifact.outputs.artifact_dmg_path }}\`"
+            echo "- App SHA256: \`${{ steps.verify_artifact.outputs.artifact_app_sha256 }}\`"
+            echo "- DMG SHA256: \`${{ steps.verify_artifact.outputs.artifact_dmg_sha256 }}\`"
+            echo "- Signing identity: \`${{ steps.verify_artifact.outputs.signing_identity }}\`"
+            echo "- Codesign status: \`${{ steps.verify_artifact.outputs.codesign_status }}\`"
+            echo "- Gatekeeper status: \`${{ steps.verify_artifact.outputs.gatekeeper_status }}\`"
+            echo "- Notarization status: \`${{ steps.verify_artifact.outputs.notarization_status }}\`"
+            echo "- Stapler status: \`${{ steps.verify_artifact.outputs.stapler_status }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
